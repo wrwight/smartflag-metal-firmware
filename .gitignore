@@ -1,0 +1,50 @@
+# Particle build output
+*.bin
+*.elf
+*.hex
+*.firmware
+
+# Particle device-specific files
+*.device.*
+
+# Particle Workbench local state
+.particle/
+
+# OS / temporary files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+*.log
+*.tmp
+*.bak
+*.swp
+
+# VSCode settings
+.vscode/
+*.code-workspace
+
+# Node.js scripts (if added later)
+node_modules/
+.env
+npm-debug.log*
+
+# Compiled source artifacts
+*.o
+*.a
+*.so
+*.dll
+*.exe
+
+# Docs build output
+/docs/build/
+
+# Archive or backup files
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Ignore firmware IDE settings
+.idea/
+*.sublime-project
+*.sublime-workspace
