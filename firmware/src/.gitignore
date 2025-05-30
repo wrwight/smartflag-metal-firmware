@@ -1,0 +1,26 @@
+# Particle build output
+*.bin
+*.elf
+*.hex
+*.firmware
+
+# Particle device-specific files
+*.device.*
+.particle/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+*.swp
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Node artifacts (optional later)
+node_modules/
+.env
+npm-debug.log*
