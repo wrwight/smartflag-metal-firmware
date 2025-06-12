@@ -4,49 +4,80 @@
 #include "Particle.h"
 
 enum Direction {
-  CW,
-  CCW
+  CW,  // Clockwise
+  CCW  // Counter-clockwise
 };
 
+enum OrderedStation {
+  ORDERED_FULL,
+  ORDERED_HALF
+};
 
-
+enum ActualStation {
+  STATION_UNKNOWN,
+  STATION_FULL,
+  STATION_HALF
+};
 
 class HalyardManager {
-  public:
-  static void initialize(int dirPin, int pwmPin);
-  static void runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed = 255, unsigned long rampTimeMs = 300);
-  static void update();  // Call this in loop()
-  static void stopMotor();
-  static bool isRunning();
-  static const int ENABLE_MOTOR = D7;
-  
-  static void setTargetPosition(const char* pos);
-  static const char* getTargetPosition();
-  static void confirmArrival();  // call when sensor triggers
-  static const char* getLastKnownPosition();
-  static void handleSensorTriggered();
-  
-  // Stall detection
-  static void setStallAmpsThreshold(float amps);  // e.g., from config
-  static float getStallAmpsThreshold();
-  static bool stallDetected();  // query stall condition
-  static void clearStall();     // reset stall flag
-  
-  private:
-  static int _dirPin;
-  static int _pwmPin;
-  static bool _isRunning;
-  static unsigned long _stopTime;
-  
-  static const char* _targetPosition;
-  static const char* _currentPosition;
+private:
+  // Motor configuration
+  int _dirPin = -1;
+  int _pwmPin = -1;
+  int _enablePin = -1;
+  int _currentSensePin = -1;  // Pin for current sensing
+  bool _isRunning = false;
+  bool _encoderPresent = false;
+  bool _stall = false;  // Stall condition flag
 
-  // ramp speed control
-  static uint8_t _targetSpeed;
-  static uint8_t _currentSpeed;
-  static unsigned long _rampStartTime;
-  static unsigned long _rampDuration;
-  static bool _rampActive;
+  // Ramp control
+  const unsigned long _minRampStartTime = 50;  // Minimum ramp time in ms
+  unsigned long _stopTime = 0;  // Time to stop motor, 0 means run indefinitely
+  unsigned long _rampStartTime = 0;
+  unsigned long _rampDuration = 0;  // Duration of the ramp in ms
+  uint8_t _targetSpeed = 255;  // Target speed for the motor
+  uint8_t _currentSpeed = 0;  // Current speed during ramping
+  bool _rampActive = false;  // Whether ramping is active
+
+  // Station tracking
+  OrderedStation _ordered = ORDERED_FULL;
+  ActualStation _actual = STATION_UNKNOWN;
+
+public:
+  // Constructor
+  HalyardManager(int dirPin, int pwmPin, int enablePin, int currentSensePin, bool encoder = false)
+    : _dirPin(dirPin), _pwmPin(pwmPin), _enablePin(enablePin), _currentSensePin(currentSensePin), _encoderPresent(encoder) {
+      pinMode(_dirPin, OUTPUT);
+      pinMode(_pwmPin, OUTPUT);
+      pinMode(_enablePin, OUTPUT);
+      pinMode(_currentSensePin, INPUT);
+
+      digitalWrite(_dirPin, LOW);
+      analogWrite(_pwmPin, LOW);
+      digitalWrite(_enablePin, LOW);
+
+      invalidateStation();  // Start with unknown station
+    }
+
+    // Station accessors
+  OrderedStation getOrderedStation() const { return _ordered; }
+  void setOrderedStation(OrderedStation s) { _ordered = s; }
+
+  ActualStation getActualStation() const { return _actual; }
+  void setActualStation(ActualStation s) { _actual = s; }
+
+  void invalidateStation() {
+    _actual = STATION_UNKNOWN;
+    Serial.println("Flag position invalidated.");
+  }
+
+  // Motor control
+  void runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed, unsigned long rampTimeMs);
+  void update();
+  void stopMotor();
+  bool isRunning() const { return _isRunning; };
+  bool stallDetected() const { return _stall; };
+  void clearStall() { _stall = false; };
 };
 
 #endif
