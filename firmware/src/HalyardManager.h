@@ -2,21 +2,18 @@
 #define HALYARD_MANAGER_H
 
 #include "Particle.h"
+#include "sensors/SensorManager.h"
+#include "BuzzerManager.h"
 
 enum Direction {
   CW,  // Clockwise
   CCW  // Counter-clockwise
 };
 
-enum OrderedStation {
-  ORDERED_FULL,
-  ORDERED_HALF
-};
-
-enum ActualStation {
-  STATION_UNKNOWN,
-  STATION_FULL,
-  STATION_HALF
+enum FlagStation {
+  FLAG_UNKNOWN,
+  FLAG_FULL,   // Flag is fully raised
+  FLAG_HALF,   // Flag is half raised
 };
 
 class HalyardManager {
@@ -29,6 +26,7 @@ private:
   bool _isRunning = false;
   bool _encoderPresent = false;
   bool _stall = false;  // Stall condition flag
+  Direction _lastDirection;
 
   // Ramp control
   const unsigned long _minRampStartTime = 50;  // Minimum ramp time in ms
@@ -40,8 +38,9 @@ private:
   bool _rampActive = false;  // Whether ramping is active
 
   // Station tracking
-  OrderedStation _ordered = ORDERED_FULL;
-  ActualStation _actual = STATION_UNKNOWN;
+  FlagStation _ordered = FLAG_FULL;
+  FlagStation _actual = FLAG_UNKNOWN;
+
 
 public:
   // Constructor
@@ -57,17 +56,20 @@ public:
       digitalWrite(_enablePin, LOW);
 
       invalidateStation();  // Start with unknown station
+      _isRunning = false;  // Motor is initially stopped
+      _stall = false;  // No stall condition at startup
     }
 
     // Station accessors
-  OrderedStation getOrderedStation() const { return _ordered; }
-  void setOrderedStation(OrderedStation s) { _ordered = s; }
+  FlagStation getOrderedStation() const { return _ordered; }
+  void setOrderedStation(FlagStation s) { _ordered = s; }
 
-  ActualStation getActualStation() const { return _actual; }
-  void setActualStation(ActualStation s) { _actual = s; }
+  FlagStation getActualStation() ;
+
+  void setActualStation(FlagStation s) { _actual = s; }
 
   void invalidateStation() {
-    _actual = STATION_UNKNOWN;
+    _actual = FLAG_UNKNOWN;
     Serial.println("Flag position invalidated.");
   }
 

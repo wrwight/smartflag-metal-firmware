@@ -51,33 +51,30 @@ void BuzzerManager::playPattern(const String& p, const String& f) {
 void BuzzerManager::playEvent(BuzzerEvent event) {
     switch (event) {
         case BUZZ_POWER_ON:
-            playPattern("1212124", "C.D.E.F");
+            playPattern("2114", "e.gg");        // USAF "Off we go..."
             break;
         case BUZZ_CONNECT:
-            // T-Mobile jingle approximation (3 short notes, 1 long, 1 short)
-            playPattern("11112", "cccec");
+            playPattern("11112", "cccec");      // T-Mobile jingle approximation
             break;
         case BUZZ_LOST:
-            // "This number is disconnected" style: 3 steady tones with pauses
-            playPattern("224", "afF");
+            playPattern("224", "afF");          // Old wired phone disconnection tone
             break;
         case BUZZ_FLAG_UP:
-            // playPattern("111211112", "e.eg.c.ce");
-            playPattern("1113", "aceA");
+            playPattern("     34", "g.g.g.C");  // triple dit - HIGH
+            // playPattern("1113", "aceA");
             break;
-        case BUZZ_FLAG_DOWN:
-            // playPattern("21214", "c.c.f");
-            playPattern("1113", "Aeca");
+            case BUZZ_FLAG_DOWN:
+            playPattern("     34", "g.g.g.c");  // triple dit - LOW
+            // playPattern("1113", "Aeca");
             break;
         case BUZZ_STALL:
-            // Nintendo "death jingle" style: descending eerie tones
-            playPattern("111111111", "af.ffe.dc");
+            playPattern("111111111", "af.ffe.dc");  // Nintendo "death jingle" style
             break;
         case BUZZ_HALF:
-        playPattern("344", "cCc");  // First three notes of "Taps"
-            break;
+            playPattern("   34", "g.g.c");  // dit-dit, LOW
+        break;
         case BUZZ_FULL:
-        playPattern("344", "gGc");  // First three notes of "Colors" trumpet call
+            playPattern("   34", "g.g.C");  // dit-dit, HIGH
             break;
         case BUZZ_STOP:
             // playPattern("11141114114", "CBA.Agf.dcb");  // Three descending sequences

@@ -19,15 +19,16 @@ bool SensorManager::lidJustOpened() {
 }
 
 bool SensorManager::markerJustArrived() {
+  bool wasPresent = _wasPresent;  // Store previous state
   bool isPresent = markerPresent();
-  bool justArrived = !_wasPresent && isPresent;  // Just arrived if was not present before
-  _wasPresent = isPresent;  // Update state for next call
-  return justArrived;
+  return isPresent && !wasPresent;  // Just arrived if was not present before but is now
 }
 
 bool SensorManager::markerJustDeparted() {
+  bool wasPresent = _wasPresent;  // Store previous state
   bool isPresent = markerPresent();
-  bool justDeparted = _wasPresent && !isPresent;  // Just arrived if was not present before
-  _wasPresent = isPresent;  // Update state for next call
-  return justDeparted;
+  return !isPresent && wasPresent;  // Just departed if was present before but is not now
+}
+bool SensorManager::markerFlipped() {
+  return markerJustArrived() || markerJustDeparted();
 }

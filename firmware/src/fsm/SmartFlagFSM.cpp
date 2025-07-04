@@ -8,34 +8,6 @@ extern BuzzerManager buzzer;
 extern SensorManager sensorMgr;
 // extern Diagnostics diagnostics;
 
-void defineIdleState(FSMController& fsm) {
-    static FSMStateID fsmNextState = STATE_NONE;
-
-    FSMState state;
-    state.onEnter = []() {
-        fsmNextState = STATE_NONE;
-        Serial.println("Idle: Monitoring station state");
-    };
-
-    state.onUpdate = []() {
-        OrderedStation ordered = halMgr1.getOrderedStation();
-        ActualStation actual = halMgr1.getActualStation();
-
-        if (actual == STATION_FULL && ordered == ORDERED_HALF) {
-            fsmNextState = STATE_PENDING_FROM_FULL;
-        } else if (actual == STATION_HALF && ordered == ORDERED_FULL) {
-            fsmNextState = STATE_PENDING_FROM_HALF;
-        // } else if (actual == STATION_HALF && ordered == ORDERED_HALF && eventManager.isIndefinite()) {
-        //     fsmNextState = STATE_PENDING_INDEFINITE;
-        }
-    };
-    state.onExit = []() {};
-    state.shouldAdvance = []() -> FSMStateID {
-        return fsmNextState;
-    };
-    fsm.addState(STATE_IDLE_FULL, state);  // Reused ID for now
-}
-
 void defineStartupState(FSMController& fsm) {
     static FSMStateID fsmNextState = STATE_NONE;
 
@@ -45,11 +17,131 @@ void defineStartupState(FSMController& fsm) {
         Serial.println("Startup: Initializing...");
     };
     state.onUpdate = []() {
-        fsmNextState = STATE_IDLE_FULL;  // Placeholder: assume flag at full initially
+        fsmNextState = STATE_CALIBRATION;  // On startup, calibration is required
     };
     state.onExit = []() {};
     state.shouldAdvance = []() -> FSMStateID { return fsmNextState; };
     fsm.addState(STATE_STARTUP, state);
+}
+
+void defineOnStationState(FSMController& fsm) {
+    static FSMStateID fsmNextState = STATE_NONE;
+
+    FSMState state;
+    state.onEnter = []() {
+        fsmNextState = STATE_NONE;
+        // Serial.println("On station: Monitoring station state");
+    };    
+
+    state.onUpdate = []() {
+        FlagStation ordered = halMgr1.getOrderedStation();
+        FlagStation actual = halMgr1.getActualStation();
+        
+        if (actual != ordered ) {
+            fsmNextState = STATE_MOVING_TO_STATION;
+        }
+    };    
+    state.onExit = []() {};
+    state.shouldAdvance = []() -> FSMStateID {
+        return fsmNextState;
+    };    
+    fsm.addState(STATE_ON_STATION, state);
+}    
+
+void defineCalibrationState(FSMController& fsm) {
+    static FSMStateID fsmNextState = STATE_NONE;
+    
+    FSMState state;
+    state.onEnter = []() {
+
+        fsmNextState = STATE_CALIBRATE_DOWN;    // Default to downward calibration
+        
+        if ( !sensorMgr.markerPresent() ) { fsmNextState = STATE_MOVING_TO_STATION; }
+
+        FlagStation actual = halMgr1.getActualStation();
+        if (actual == FLAG_HALF) { fsmNextState = STATE_CALIBRATE_UP; }
+    };    
+
+    state.onUpdate = []() {};    
+    state.onExit = []() {};
+    state.shouldAdvance = []() -> FSMStateID {
+        return fsmNextState;
+    };    
+    fsm.addState(STATE_CALIBRATION, state);
+}    
+
+void defineCalibrateDownState(FSMController& fsm) {
+    static FSMStateID fsmNextState = STATE_NONE;
+
+    FSMState state;
+    state.onEnter = []() {
+        fsmNextState = STATE_NONE;
+        // Move motor DOWN slowly (ignoring sensor)
+    };    
+
+    state.onUpdate = []() {
+        // Watch for sensor to go OFF -> MOVING_TO_STATION
+    };    
+
+    state.onExit = []() {
+        // Stop motor?
+    };
+    state.shouldAdvance = []() -> FSMStateID {
+        return fsmNextState;
+    };    
+    fsm.addState(STATE_CALIBRATE_DOWN, state);
+}
+
+void defineCalibrateUpState(FSMController& fsm) {
+    static FSMStateID fsmNextState = STATE_NONE;
+
+    FSMState state;
+    state.onEnter = []() {
+        fsmNextState = STATE_NONE;
+        // Move motor UP slowly (ignoring sensor)
+    };    
+
+    state.onUpdate = []() {
+        // Watch for sensor to go OFF -> MOVING_TO_STATION
+    };    
+
+    state.onExit = []() {
+        // Stop motor?
+    };
+    state.shouldAdvance = []() -> FSMStateID {
+        return fsmNextState;
+    };    
+    fsm.addState(STATE_CALIBRATE_UP, state);
+}
+
+void defineMovingToStationState(FSMController& fsm) {
+    static FSMStateID fsmNextState = STATE_NONE;
+
+    FSMState state;
+    state.onEnter = []() {
+        fsmNextState = STATE_NONE;
+        // Move motor UP or DOWN to reach the station
+        if (halMgr1.getOrderedStation() == FLAG_HALF) {
+            buzzer.playEventWait(BUZZ_FLAG_DOWN);
+            halMgr1.runMotor(CW, 120000, 255, 1500); // Move down to HALF
+        } else {
+            buzzer.playEventWait(BUZZ_FLAG_UP);
+            halMgr1.runMotor(CCW, 120000, 255, 1500); // Move up to FULL
+        }
+    };    
+
+    state.onUpdate = []() {
+        if (!halMgr1.isRunning()) {             // Continue moving until the motor stops
+            // Need some error checking in here for stalls or timeouts
+            fsmNextState = STATE_ON_STATION;    // Once the motor stops, we are on station
+        }
+    };    
+
+    state.onExit = []() {};
+    state.shouldAdvance = []() -> FSMStateID {
+        return fsmNextState;
+    };    
+    fsm.addState(STATE_MOVING_TO_STATION, state);
 }
 
 void defineLidOpenState(FSMController& fsm) {
@@ -73,34 +165,41 @@ void defineLidOpenState(FSMController& fsm) {
     fsm.addState(STATE_LID_OPEN, state);
 }
 
-void defineFixMeState(FSMController& fsm) {
+void defineFaultRecoveryState(FSMController& fsm) {
     static FSMStateID fsmNextState = STATE_NONE;
+    static unsigned long _fixMeStartTime = 0; // Start time for fault recovery
+
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
         Serial.println("ERROR: Entering FIX_ME");
         buzzer.playPattern("4444", "____");
+        _fixMeStartTime = millis();  // Record the start time for the fault recovery    
     };
     
     state.onUpdate = []() {
-        // if (diagnostics.resetRequested()) {
-        //     fsmNextState = STATE_STARTUP;
-        // }
+        if ( ( millis() - _fixMeStartTime ) > 30000UL ) { // 30 seconds timeout
+            fsmNextState = STATE_CALIBRATION;  // If no resolution, return to calibration
+        }
     };
 
     state.onExit = []() {
     };
 
     state.shouldAdvance = []() -> FSMStateID { return fsmNextState; };
-    fsm.addState(STATE_FIX_ME, state);
+    fsm.addState(STATE_FAULT_RECOVERY, state);
 }
 
 // Unified FSM setup function
 void setupFSM(FSMController& fsm) {
     defineStartupState(fsm);
-    defineIdleState(fsm);            // Unified idle state
+    defineOnStationState(fsm);            // Unified idle state
+    defineCalibrationState(fsm);
+    defineCalibrateDownState(fsm);
+    defineCalibrateUpState(fsm);
+    defineMovingToStationState(fsm);
     defineLidOpenState(fsm);
-    defineFixMeState(fsm);
+    defineFaultRecoveryState(fsm);
 }
 
 // FSMController implementation
@@ -121,7 +220,7 @@ void FSMController::update() {
     if (state.onUpdate) state.onUpdate();
     if (state.shouldAdvance) {
         FSMStateID next = state.shouldAdvance();
-        if (next != STATE_NONE && next != _current) {
+        if (next != STATE_NONE && next != _current) {       // remove _current check to allow re-entrance
             if (state.onExit) state.onExit();
             if (_states[next].onEnter) _states[next].onEnter();
             _current = next;

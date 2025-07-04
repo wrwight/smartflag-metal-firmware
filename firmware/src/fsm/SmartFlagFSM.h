@@ -10,15 +10,13 @@
 enum FSMStateID {
     STATE_NONE = 0,
     STATE_STARTUP,
-    STATE_IDLE_FULL,
-    STATE_IDLE_HALF,
-    STATE_PENDING_FROM_FULL,
-    STATE_PENDING_FROM_HALF,
-    STATE_PENDING_INDEFINITE,
-    STATE_MOVING_UP,
-    STATE_MOVING_DOWN,
+    STATE_ON_STATION,
+    STATE_CALIBRATION,
+    STATE_CALIBRATE_DOWN,
+    STATE_CALIBRATE_UP,
+    STATE_MOVING_TO_STATION,
     STATE_LID_OPEN,
-    STATE_FIX_ME,
+    STATE_FAULT_RECOVERY,
     STATE_MAX
 };
 
@@ -34,8 +32,8 @@ class FSMController {
 private:
     FSMState _states[STATE_MAX];
     FSMStateID _current = STATE_NONE;
-
-public:
+    
+    public:
     void addState(FSMStateID id, const FSMState& state);
     void begin(FSMStateID initial);
     void update();
@@ -44,5 +42,6 @@ public:
 
 // State registration
 void setupFSM(FSMController& fsm);
+// unsigned long _fixMeStartTime = 0;
 
 #endif

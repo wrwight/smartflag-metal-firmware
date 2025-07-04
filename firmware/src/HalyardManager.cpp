@@ -1,28 +1,32 @@
 #include "HalyardManager.h"
 #include "BuzzerManager.h"
+#include "sensors/SensorManager.h"
 
 float _stallLimitAmps = 1.8;
 #define CURRENT_SENSOR_SCALE 2.0  // Example: 5A per volt
 
 extern BuzzerManager buzzer;
+extern SensorManager sensorMgr;
 
 void HalyardManager::runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed, unsigned long rampTimeMs) {
-  // dumpMotor( dir, durationMs, targetSpeed, rampTimeMs );
+
   if (_dirPin == -1 || _pwmPin == -1 || _enablePin == -1 ) return;
 
   buzzer.playEventWait(dir == CW ? BUZZ_FLAG_DOWN : BUZZ_FLAG_UP);
 
   digitalWrite(_dirPin, (dir == CW) ? HIGH : LOW);
-
+  _lastDirection = dir;  // Store last direction for future reference
+  
   // Establish initial ramp parameters
-
+  
   _targetSpeed = targetSpeed;
   _rampStartTime = millis();
   _rampDuration = rampTimeMs < _minRampStartTime ? _minRampStartTime : rampTimeMs;  // Ensure minimum ramp time
   _rampActive = true;
   _currentSpeed = 0 ;  // Start at 0 for ramping (now mandatory - must ramp to avoid initial current spike, which causes stall detection)
-
+  
   analogWrite(_pwmPin, _currentSpeed);  // Start at 0
+  sensorMgr.noteMarker();  // Record current marker state
   digitalWrite(_enablePin, HIGH);
 
   if ( durationMs == 0 ) {
@@ -67,6 +71,18 @@ void HalyardManager::update() {
     if (_stopTime > 0 && millis() >= _stopTime) {
       stopMotor();
     }
+
+    // 4. Check marker for Just Arrived
+    if (sensorMgr.markerJustArrived()) {
+      stopMotor();  // Stop motor if marker just arrived
+      if ( _lastDirection == CW ) {
+        setActualStation(FLAG_HALF);  // Set actual station to HALF
+        buzzer.playEventWait(BUZZ_HALF);
+      } else {
+        setActualStation(FLAG_FULL);  // Set actual station to FULL
+        buzzer.playEventWait(BUZZ_FULL);
+      }
+    }
   }
 }
 
@@ -76,3 +92,11 @@ void HalyardManager::stopMotor() {
   _isRunning = false;
   buzzer.playEventWait(BUZZ_STOP);
 }
+
+FlagStation HalyardManager::getActualStation() {  // Return the actual station only if the marker is present
+  if ( !sensorMgr.markerPresent())  {
+    setActualStation(FLAG_UNKNOWN);  // If marker is not present, reset actual station
+  }
+  return _actual;  
+}
+
