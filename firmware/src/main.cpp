@@ -4,8 +4,7 @@
 
 #include "Particle.h"
 #line 1 "c:/SmartFlagRepos/smartflag-metal-firmware/firmware/src/main.ino"
-#include "fsm/FSMController.h"
-#include "fsm/FSMState.h"
+#include "fsm/SmartFlagFSM.h"
 #include "HalyardManager.h"
 #include "sensors/SensorManager.h"
 #include "BuzzerManager.h"

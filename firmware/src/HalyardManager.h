@@ -16,6 +16,16 @@ enum FlagStation {
   FLAG_HALF,   // Flag is half raised
 };
 
+enum FlagMoveStatus {
+  FLAG_MOVE_NONE,      // No movement
+  FLAG_MOVING_UP,        // Moving up (CW)
+  FLAG_MOVING_DOWN,      // Moving down (CCW)
+  FLAG_ON_STATION,   // Moving to station
+  FLAG_MOVE_CANCELLED,  // Movement cancelled
+  FLAG_MOVE_TIMEOUT,      // Movement timeout
+  FLAG_MOVE_STALL      // Stall condition detected
+};
+
 class HalyardManager {
 private:
   // Motor configuration
@@ -26,6 +36,8 @@ private:
   bool _isRunning = false;
   bool _encoderPresent = false;
   bool _stall = false;  // Stall condition flag
+  FlagMoveStatus _moveStatus = FLAG_MOVE_NONE;  // Current move status
+  unsigned long _lastUpdateTime = 0;  // Last update time for the motor status
   Direction _lastDirection;
 
   // Ramp control
@@ -46,14 +58,6 @@ public:
   // Constructor
   HalyardManager(int dirPin, int pwmPin, int enablePin, int currentSensePin, bool encoder = false)
     : _dirPin(dirPin), _pwmPin(pwmPin), _enablePin(enablePin), _currentSensePin(currentSensePin), _encoderPresent(encoder) {
-      pinMode(_dirPin, OUTPUT);
-      pinMode(_pwmPin, OUTPUT);
-      pinMode(_enablePin, OUTPUT);
-      pinMode(_currentSensePin, INPUT);
-
-      digitalWrite(_dirPin, LOW);
-      analogWrite(_pwmPin, LOW);
-      digitalWrite(_enablePin, LOW);
 
       invalidateStation();  // Start with unknown station
       _isRunning = false;  // Motor is initially stopped
@@ -66,6 +70,8 @@ public:
 
   FlagStation getActualStation() ;
 
+  FlagMoveStatus getMoveStatus() const { return _moveStatus; }
+
   void setActualStation(FlagStation s) { _actual = s; }
 
   void invalidateStation() {
@@ -73,13 +79,15 @@ public:
     Serial.println("Flag position invalidated.");
   }
 
+  void begin();
   // Motor control
   void runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed, unsigned long rampTimeMs);
   void update();
-  void stopMotor();
+  void stopMotor( FlagMoveStatus status = FLAG_MOVE_NONE);
   bool isRunning() const { return _isRunning; };
   bool stallDetected() const { return _stall; };
   void clearStall() { _stall = false; };
+  bool lowering() const { return _lastDirection == CW; };
 };
 
 #endif

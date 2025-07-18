@@ -4,6 +4,10 @@
 
 extern BuzzerManager buzzer;
 
+// String militarySongs[] = {
+//     "2114", "e.ggfed",  // USAF "Off we go..."
+//     "2114", "e.gg",  // USAF "Off we go..."
+// };
 // Function to handle Particle function call for playing tones
 // Expects JSON input like: {"p":"1234", "f":"abcd"}
 int PlayTones(String json) {
@@ -60,34 +64,55 @@ void BuzzerManager::playEvent(BuzzerEvent event) {
             playPattern("224", "afF");          // Old wired phone disconnection tone
             break;
         case BUZZ_FLAG_UP:
-            playPattern("     34", "g.g.g.C");  // triple dit - HIGH
-            // playPattern("1113", "aceA");
+            playPattern("1111134", "g.g.g.C");  // triple dit - HIGH
             break;
-            case BUZZ_FLAG_DOWN:
-            playPattern("     34", "g.g.g.c");  // triple dit - LOW
-            // playPattern("1113", "Aeca");
+        case BUZZ_FLAG_DOWN:
+            playPattern("1111134", "g.g.g.c");  // triple dit - LOW
             break;
         case BUZZ_STALL:
             playPattern("111111111", "af.ffe.dc");  // Nintendo "death jingle" style
             break;
+        case BUZZ_TIMEOUT:
+            playPattern("1313141444", "F.C.F.C..c");  // Tic-toc...
+            break;
         case BUZZ_HALF:
-            playPattern("   34", "g.g.c");  // dit-dit, LOW
+            playPattern("11134", "g.g.c");  // dit-dit, LOW
         break;
         case BUZZ_FULL:
-            playPattern("   34", "g.g.C");  // dit-dit, HIGH
+            playPattern("11134", "g.g.C");  // dit-dit, HIGH
             break;
         case BUZZ_STOP:
-            // playPattern("11141114114", "CBA.Agf.dcb");  // Three descending sequences
             playPattern("2224", "ccca");  // Three descending sequences
             break;
+        case BUZZ_STARTUP:  // Startup sound
+            playPattern("44114", "cc.B.");  // Low, then one high note
+            break;
+        case BUZZ_ON_STATION:  // Startup sound
+            playPattern("441114", "cc.BB.");  // Low, then two high notes
+            break;
+        case BUZZ_CALIB:  // Calibration sound
+            playPattern("4411114", "cc.BBB.");  // Low, then three high notes
+            break;
+        case BUZZ_MOVING_TO_STATION:  // Sound when moving to station
+            playPattern("44111114", "cc.BBBB.");  // Low, then four high notes
+            break;
+        case BUZZ_LID_OPEN:  // Sound when lid is open
+            playPattern("441111114", "cc.BBBBB.");  // Low, then five high notes
+            break;
+        case BUZZ_FAULT_RECOVERY:  // Sound for fault recovery
+            playPattern("4411111114", "cc.BBBBBB.");  // Low, then six high notes
+            break;
         case BUZZ_DEBUG_1:
-            playPattern("442144", "aa.e..");  // Two lows, then debug count
+            // playPattern("442144", "aa.e..");  // Two lows, then debug count
+            playPattern("1", "c");  // Two lows, then debug count
             break;
-        case BUZZ_DEBUG_2:
-            playPattern("4421144", "aa.ee..");  // Two lows, then debug count
+            case BUZZ_DEBUG_2:
+            // playPattern("4421144", "aa.ee..");  // Two lows, then debug count
+            playPattern("1", "f");  // Two lows, then debug count
             break;
-        case BUZZ_DEBUG_3:
-            playPattern("44211144", "aa.eee..");  // Two lows, then debug count
+            case BUZZ_DEBUG_3:
+            // playPattern("44211144", "aa.eee..");  // Two lows, then debug count
+            playPattern("1", "C");  // Two lows, then debug count
             break;
         case BUZZ_DEBUG_4:  
             playPattern("442111144", "aa.eeee..");  // Two lows, then debug count

@@ -11,9 +11,16 @@ enum BuzzerEvent {
     BUZZ_FLAG_UP,
     BUZZ_FLAG_DOWN,
     BUZZ_STALL,
+    BUZZ_TIMEOUT,
     BUZZ_HALF,
     BUZZ_FULL,
     BUZZ_STOP,
+    BUZZ_STARTUP,  // Startup sound
+    BUZZ_ON_STATION,  // Sound when on station
+    BUZZ_CALIB,  // Calibration sound
+    BUZZ_MOVING_TO_STATION,  // Sound when moving to station
+    BUZZ_LID_OPEN,  // Sound when lid is open
+    BUZZ_FAULT_RECOVERY,  // Sound for fault recovery    
     BUZZ_DEBUG_1,
     BUZZ_DEBUG_2,
     BUZZ_DEBUG_3,

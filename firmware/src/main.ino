@@ -1,6 +1,6 @@
 #include "Particle.h"
 #include "HalyardManager.h"
-#include "sensors/SensorManager.h"
+#include "sensors/Sensor.h"
 #include "BuzzerManager.h"
 #include "fsm/SmartFlagFSM.h"
 // Include necessary libraries
@@ -10,9 +10,10 @@ const int PWM_PIN = D6;  // PWM pin for motor speed control
 const int MOTOR_ENABLE_PIN = D7;  // Enable pin for motor control
 const int CURRENT_SENSE_PIN = A4;  // Pin for current sensing (if needed)
 // Sensor pins
-const int SENSOR_ENABLE_PIN = D8;  // Powers D2 & D3 sensors
-const int LID_SENSOR_PIN = D10;  // Lid sensor pin - HIGH when closed, LOW when open
-const int HALYARD_SENSOR_PIN = D11;  // Halyard sensor pin - HIGH when marker present, LOW when absent
+const int SENSOR_ENABLE_PIN = D8;  // Powers LID sensor
+const int HALF_SENSOR_PIN = D10;  // Half marker active when pin reads LOW (default)
+const int FULL_SENSOR_PIN = D11;  // Half marker active when pin reads LOW (default)
+const int LID_SENSOR_PIN = D12;  // Lid sensor pin - LOW when closed, HIGH when open
 
 // Let Device OS manage the connection to the Particle Cloud
 SYSTEM_MODE(AUTOMATIC);
@@ -24,45 +25,60 @@ SYSTEM_THREAD(ENABLED);
 // View logs with CLI using 'particle serial monitor --follow'
 // SerialLogHandler logHandler(LOG_LEVEL_INFO);
 
-
 BuzzerManager buzzer;   // Future enhancement, initialize buzzer in constructor
 HalyardManager halMgr1 (DIR_PIN, PWM_PIN, MOTOR_ENABLE_PIN, CURRENT_SENSE_PIN, false); // Initialize without encoder support
-SensorManager sensorMgr( SENSOR_ENABLE_PIN , LID_SENSOR_PIN , HALYARD_SENSOR_PIN ); // Halyard sensor pin A0, Lid sensor pin A1
 FSMController fsm; // FSM controller instance
+Sensor halfSensor(HALF_SENSOR_PIN);       // Half marker active (near) when pin reads LOW (default)
+Sensor fullSensor(FULL_SENSOR_PIN);       // Full marker active (near) when pin reads LOW (default)
+Sensor lidSensor(LID_SENSOR_PIN);         // Lid sensor active (closed) when pin reads LOW (default)
 
 void setup() {
   
-  buzzer.begin();
-  
-  buzzer.playEventWait(BUZZ_POWER_ON);
-  
-  // Initiate Particle connection
-  while (!Particle.connected()) {
-    Particle.connect();
-    Particle.process();
-    delay(100);
-  }
-  
-  buzzer.playEventWait(BUZZ_CONNECT);
-  
-          pinMode(D10, INPUT);
-          pinMode(D11, INPUT);
+    buzzer.begin();
+    buzzer.playEventWait(BUZZ_POWER_ON);  // Play power-on sound ("Off we go...")
 
-  Particle.function("RunMotor", handleRunMotor);
-  
-  
-  setupFSM (fsm);
-  // fsm.begin(STATE_STARTUP); // Start with the startup state
+// Initialize sensors
+    halfSensor.begin(); // Initialize half sensor
+    fullSensor.begin(); // Initialize full sensor
+
+// Turn the LID sensor on
+    pinMode( SENSOR_ENABLE_PIN, OUTPUT); // Lid sensor enable pin
+    digitalWrite( SENSOR_ENABLE_PIN, LOW); // Enable lid sensor by default
+    lidSensor.begin(); // Initialize lid sensor
+
+// Initialize the halyard manager
+    halMgr1.begin(); // Set up motor pins and initial state
+
+// Initiate Particle connection
+    while (!Particle.connected()) {
+        Particle.connect();
+        Particle.process();
+        delay(100);
+    }
+
+// Connected!
+    buzzer.playEventWait(BUZZ_CONNECT); // T-mobile jingle approximation
+
+    // Debugging functions
+    Particle.function("RunMotor", handleRunMotor);
+
+    setupFSM (fsm);
+    fsm.begin(STATE_STARTUP); // Start with the startup state
 }
 
 void loop() {
-  
-  fsm.update(); // Update the FSM state machine
-  sensorMgr.update(); // Update sensor states
-  buzzer.update();
-  halMgr1.update(); // I think maybe the fsm is taking care of this?
-  // sensorsString = showSensors();  // Keep updating the status
 
+    buzzer.update();
+
+    
+    if ( !lidSensor.isPresent() && fsm.currentState() != STATE_LID_OPEN ) { // If the lid just opened
+        fsm.begin(STATE_LID_OPEN); // Interrupt current state and go to LID_OPEN
+    } else if (lidSensor.isPresent() && fsm.currentState() == STATE_LID_OPEN) {
+        fsm.begin(STATE_CALIBRATION); // Must calibrate again
+    }
+    
+    halMgr1.update();       // Update the halyard manager state
+    fsm.update();           // Update the FSM state machine
 }
 
 int handleRunMotor(String json) {
@@ -108,5 +124,5 @@ int handleRunMotor(String json) {
     if ( rmp > dur ) rmp = dur; // Ensure ramp time does not exceed duration
 
     halMgr1.runMotor(dir, dur, spd, rmp);
-    return 1;
+    return dur;
 }
