@@ -4,7 +4,6 @@
 #include "Particle.h"
 #include <functional>
 #include "HalyardManager.h"
-#include "sensors/SensorManager.h"
 #include "BuzzerManager.h"
 
 enum FSMStateID {
@@ -27,7 +26,7 @@ public:
 };
 
 class FSMController {
-private:
+    private:
     FSMState _states[STATE_MAX];
     FSMStateID _current = STATE_NONE;
     

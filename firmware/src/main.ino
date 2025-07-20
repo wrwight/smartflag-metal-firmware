@@ -61,6 +61,8 @@ void setup() {
 
     // Debugging functions
     Particle.function("RunMotor", handleRunMotor);
+    Particle.function("SetStation", setStation);
+    Particle.variable("Status", getStatus);
 
     setupFSM (fsm);
     fsm.begin(STATE_STARTUP); // Start with the startup state
@@ -79,6 +81,28 @@ void loop() {
     
     halMgr1.update();       // Update the halyard manager state
     fsm.update();           // Update the FSM state machine
+}
+
+int setStation(String json) {
+    JSONValue root = JSONValue::parseCopy(json);
+    if (!root.isObject()) return -1; // Invalid JSON format
+
+    JSONObjectIterator iter(root);
+
+    while (iter.next()) {
+        String upName = String(iter.name()).toUpperCase();
+        if (upName == "HALF") {
+            halMgr1.setOrderedStation(FLAG_HALF);
+        } else if (upName == "FULL") {
+            halMgr1.setOrderedStation(FLAG_FULL);
+        } else if (upName == "UNKNOWN") {
+            halMgr1.setOrderedStation(FLAG_UNKNOWN);
+        } else {
+            return -2; // Unknown parameter
+        }
+    }
+
+    return 0; // Success
 }
 
 int handleRunMotor(String json) {
@@ -125,4 +149,34 @@ int handleRunMotor(String json) {
 
     halMgr1.runMotor(dir, dur, spd, rmp);
     return dur;
+}
+
+
+String getStatus() {
+    String statusReport;
+    String stateStr;
+    String stationNames[] = {"UNKNOWN", "FULL", "HALF"};
+
+    switch (fsm.currentState()) {
+        case STATE_NONE: stateStr = "NONE"; break;
+        case STATE_STARTUP: stateStr = "STARTUP"; break;
+        case STATE_ON_STATION: stateStr = "ON_STATION"; break;
+        case STATE_CALIBRATION: stateStr = "CALIBRATION"; break;
+        case STATE_MOVING_TO_STATION: stateStr = "MOVING_TO_STATION"; break;
+        case STATE_LID_OPEN: stateStr = "LID_OPEN"; break;
+        case STATE_FAULT_RECOVERY: stateStr = "FAULT_RECOVERY"; break;
+        default: stateStr = "UNKNOWN"; break;
+    }
+
+    String orderedStr  = stationNames[halMgr1.getOrderedStation()];
+    String actualStr   = stationNames[halMgr1.getActualStation()];
+    String motorStr    = halMgr1.isRunning() ? "RUNNING" : "STOPPED";
+
+    statusReport = String::format(
+        "FSM:%s OSTA:%s ASTA:%s MTR:%s",
+        stateStr.c_str(),
+        orderedStr.c_str(),
+        actualStr.c_str(),
+        motorStr.c_str() );
+    return statusReport;
 }

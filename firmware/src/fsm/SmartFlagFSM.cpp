@@ -5,6 +5,7 @@
 
 extern HalyardManager halMgr1;
 extern BuzzerManager buzzer;
+
 // extern EventManager eventManager;
 // extern Diagnostics diagnostics;
 
@@ -18,7 +19,7 @@ void defineStartupState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        buzzer.playEventWait(BUZZ_STARTUP);
+        // buzzer.playEventWait(BUZZ_STARTUP);
 
         // Load configuration from EEPROM
         // Serial.println("Startup: Initializing...");
@@ -37,7 +38,7 @@ void defineOnStationState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        buzzer.playEventWait(BUZZ_ON_STATION);
+        // buzzer.playEventWait(BUZZ_ON_STATION);
         // Serial.println("On station: Monitoring station state");
     };    
 
@@ -62,7 +63,7 @@ void defineCalibrationState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
 
-        buzzer.playEventWait(BUZZ_CALIB); // Play "Connected" sound
+        // buzzer.playEventWait(BUZZ_CALIB); // Play "Connected" sound
 
         // Ensure a valid Ordered station is set, or default to FULL
 
@@ -73,10 +74,10 @@ void defineCalibrationState(FSMController& fsm) {
         // If only one sensor is present, set the station accordingly
         
         if ( fullSensor.isPresent() && !halfSensor.isPresent() ) {
-            buzzer.playEventWait(BUZZ_FULL);
+            buzzer.playEvent(BUZZ_FULL);
             halMgr1.setActualStation(FLAG_FULL);  // Set to FULL station
         } else if ( halfSensor.isPresent() && !fullSensor.isPresent() ) {
-            buzzer.playEventWait(BUZZ_HALF);
+            buzzer.playEvent(BUZZ_HALF);
             halMgr1.setActualStation(FLAG_HALF);  // Set to HALF station
         } else {
             halMgr1.invalidateStation();  // Reset position
@@ -100,25 +101,42 @@ void defineMovingToStationState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        buzzer.playEventWait(BUZZ_MOVING_TO_STATION);
         // Move motor UP or DOWN to reach the station
         if ( halMgr1.getActualStation() == halMgr1.getOrderedStation() ) {
             fsmNextState = STATE_ON_STATION;  // Already on station, no need to move
             return;
         }
-        if (halMgr1.getOrderedStation() == FLAG_HALF) {
-            buzzer.playEventWait(BUZZ_FLAG_DOWN);
+        FlagStation ordered = halMgr1.getOrderedStation();
+        if (ordered == FLAG_HALF) {
             halMgr1.runMotor(CW, 120000, 255, 1500); // Move down to HALF
-        } else {
-            buzzer.playEventWait(BUZZ_FLAG_UP);
+        } else if (ordered == FLAG_FULL) {
             halMgr1.runMotor(CCW, 120000, 255, 1500); // Move up to FULL
         }
     };    
 
     state.onUpdate = []() {
         if (!halMgr1.isRunning()) {             // Continue moving until the motor stops
-            // Need some error checking in here for stalls or timeouts
-            fsmNextState = STATE_ON_STATION;    // Once the motor stops, we are on station
+            FlagMoveStatus status = halMgr1.getMoveStatus();
+            if ( status == FLAG_ON_STATION ) {
+                halMgr1.setActualStation(halMgr1.getOrderedStation());  // Set actual station to ordered
+                fsmNextState = STATE_ON_STATION;            // Go to the "on station" state
+            } else if (status == FLAG_MOVE_CANCELLED) {     // Probably LID_OPEN
+                halMgr1.invalidateStation();                // Reset position
+                fsmNextState = STATE_LID_OPEN;              // Go to the "fix it" state
+            } else if (status == FLAG_MOVE_TIMEOUT) {
+                // buzzer.playEventWait(BUZZ_TIMEOUT);      // Play timeout sound
+                halMgr1.invalidateStation();                // Reset position
+                fsmNextState = STATE_FAULT_RECOVERY;        // Go to the "fix it" state
+            } else if (status == FLAG_MOVE_STALL) {
+                // buzzer.playEventWait(BUZZ_STALL);        // Play stall sound
+                fsmNextState = STATE_FAULT_RECOVERY;        // Go to the "fix it" state
+            }
+        }
+        if ( ( halMgr1.getOrderedStation() == FLAG_FULL && halMgr1.getMoveStatus() == FLAG_MOVING_DOWN ) ||
+             ( halMgr1.getOrderedStation() == FLAG_HALF && halMgr1.getMoveStatus() == FLAG_MOVING_UP )      ) {  // If the ordered station has changed
+                halMgr1.stopMotor(FLAG_MOVE_CANCELLED);  // Stop the motor
+            halMgr1.invalidateStation();  // Reset position
+            fsmNextState = STATE_CALIBRATION;  // Go back to calibration
         }
     };    
 
@@ -135,12 +153,12 @@ void defineLidOpenState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        buzzer.playEventWait(BUZZ_LID_OPEN);
+        // buzzer.playEventWait(BUZZ_LID_OPEN);
 
         if ( halMgr1.isRunning() ) halMgr1.stopMotor( FLAG_MOVE_CANCELLED );  // Stop the motor if it is running
         halMgr1.invalidateStation();  // reset position
         // report lid opening to host
-        buzzer.playEventWait(BUZZ_STOP);  // Play a sound to indicate lid is open
+        buzzer.playEvent(BUZZ_STOP);  // Play a sound to indicate lid is open
     };
     state.onUpdate = []() {
         if (lidSensor.isPresent()) {
@@ -162,10 +180,10 @@ void defineFaultRecoveryState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        buzzer.playEventWait(BUZZ_FAULT_RECOVERY);
+        // buzzer.playEventWait(BUZZ_FAULT_RECOVERY);
 
-        Serial.println("ERROR: Entering FIX_ME");
-        buzzer.playPattern("4444", "____");
+        // Serial.println("ERROR: Entering FIX_ME");
+        buzzer.playEvent(BUZZ_FAULT_RECOVERY);  // Play fault recovery sound
         _fixMeStartTime = millis();  // Record the start time for the fault recovery    
     };
     

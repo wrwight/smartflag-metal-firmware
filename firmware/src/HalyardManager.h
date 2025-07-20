@@ -2,7 +2,6 @@
 #define HALYARD_MANAGER_H
 
 #include "Particle.h"
-#include "sensors/SensorManager.h"
 #include "BuzzerManager.h"
 
 enum Direction {
@@ -41,7 +40,9 @@ private:
   Direction _lastDirection;
 
   // Ramp control
-  const unsigned long _minRampStartTime = 50;  // Minimum ramp time in ms
+  const unsigned long _minRampStartTime = 50;  // Minimum ramp time in m
+  const unsigned long _defRunTime = 10000;  // Default run time in ms (debug)
+  // const unsigned long _defRunTime = 120000;  // Default run time in ms (prod)
   unsigned long _stopTime = 0;  // Time to stop motor, 0 means run indefinitely
   unsigned long _rampStartTime = 0;
   unsigned long _rampDuration = 0;  // Duration of the ramp in ms

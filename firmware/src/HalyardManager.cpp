@@ -26,7 +26,6 @@ void HalyardManager::begin() {
 }
 void HalyardManager::runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed, unsigned long rampTimeMs) {
   
-  buzzer.playEventWait(dir == CW ? BUZZ_FLAG_DOWN : BUZZ_DEBUG_1);
   if (_dirPin == -1 || _pwmPin == -1 || _enablePin == -1 ) {
     _moveStatus = FLAG_MOVE_NONE;  // No motor pins defined, cannot run
     return;
