@@ -4,6 +4,24 @@
 #include "Particle.h"
 #include "BuzzerManager.h"
 
+// ADC pins
+#define SET_PIN(x)                                  ((pin_t)(x))
+#define PD15                                    SET_PIN(15)
+#define PD16                                    SET_PIN(16)
+#define PA3                                     PD16
+#define PA4                                     PD15
+#define INPUT_VOLT_SENSE_PIN                        PD16
+#define MOTOR_CURRENT_PIN                           PD15
+
+// ADC coefs
+#define ADC_MAX                                     4095
+#define ADC_REF_VOLT                                3.3
+#define ADC_TO_VOLT(x)                              ((double)((x) * ADC_REF_VOLT / ADC_MAX))
+#define INPUT_VOLT_SCALE_FAC                        11      // V(in) --[100K resistor]--<measure>--[10K resistor]--||| (ground)
+#define MOTOR_VOLT_TO_AMP_FAC                       2.0     // Motor current sensing coefs
+// #define MOTOR_VOLT_TO_AMP_FAC                       0.661   // Motor current sensing coefs
+
+// Motor direction
 enum Direction {
   CW,  // Clockwise
   CCW  // Counter-clockwise
@@ -13,6 +31,7 @@ enum FlagStation {
   FLAG_UNKNOWN,
   FLAG_FULL,   // Flag is fully raised
   FLAG_HALF,   // Flag is half raised
+  FLAG_STOP // Flag is stopped
 };
 
 enum FlagMoveStatus {
@@ -26,7 +45,7 @@ enum FlagMoveStatus {
 };
 
 class HalyardManager {
-private:
+  private:
   // Motor configuration
   int _dirPin = -1;
   int _pwmPin = -1;
@@ -38,7 +57,11 @@ private:
   FlagMoveStatus _moveStatus = FLAG_MOVE_NONE;  // Current move status
   unsigned long _lastUpdateTime = 0;  // Last update time for the motor status
   Direction _lastDirection;
-
+  
+  double _smoothedAmps;
+  const double _alpha = 0.2;      // smoothing factor  
+  double readInstantAmps();
+  
   // Ramp control
   const unsigned long _minRampStartTime = 50;  // Minimum ramp time in m
   const unsigned long _defRunTime = 10000;  // Default run time in ms (debug)
@@ -53,7 +76,9 @@ private:
   // Station tracking
   FlagStation _ordered = FLAG_FULL;
   FlagStation _actual = FLAG_UNKNOWN;
-
+  FlagStation _forced = FLAG_UNKNOWN;  // Forced station for testing
+  unsigned long _forcedDuration = 0;  // Expiration time for forced station
+  unsigned long _forcedBeginning = 0;  // Starting time for forced station
 
 public:
   // Constructor
@@ -66,12 +91,15 @@ public:
     }
 
     // Station accessors
-  FlagStation getOrderedStation() const { return _ordered; }
-  void setOrderedStation(FlagStation s) { _ordered = s; }
+  FlagStation getOrderedStation() const { return _forced != FLAG_UNKNOWN ? _forced : _ordered; }
+  // void setOrderedStation(FlagStation s) { _ordered = s; }
+  void setOrderedStation(FlagStation s);
 
   FlagStation getActualStation() ;
 
   FlagMoveStatus getMoveStatus() const { return _moveStatus; }
+
+  void setForcedStation(FlagStation s, unsigned long expiration );
 
   void setActualStation(FlagStation s) { _actual = s; }
 
@@ -80,10 +108,15 @@ public:
     Serial.println("Flag position invalidated.");
   }
 
+
   void begin();
   // Motor control
   void runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed, unsigned long rampTimeMs);
   void update();
+  float getMotorCurrent();
+  float getSmoothedAmps();
+  float getInputVoltage();
+  void updateSmoothedAmps();
   void stopMotor( FlagMoveStatus status = FLAG_MOVE_NONE);
   bool isRunning() const { return _isRunning; };
   bool stallDetected() const { return _stall; };

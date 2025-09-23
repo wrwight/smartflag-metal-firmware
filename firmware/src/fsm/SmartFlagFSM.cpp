@@ -1,5 +1,7 @@
 #include "SmartFlagFSM.h"
+#include "FaultManager.h"
 #include "sensors/Sensor.h"
+#include "FlagUtils.h"
 
 // External references
 
@@ -38,8 +40,8 @@ void defineOnStationState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        // buzzer.playEventWait(BUZZ_ON_STATION);
-        // Serial.println("On station: Monitoring station state");
+        checkAndReportStatus( true , "ONS");   // Periodic status report
+
     };    
 
     state.onUpdate = []() {
@@ -57,18 +59,36 @@ void defineOnStationState(FSMController& fsm) {
     fsm.addState(STATE_ON_STATION, state);
 }    
 
+/**
+ * Calibration state: Determine current position using sensors
+ * If sensors are ambiguous, set position to UNKNOWN
+ * 
+ * Initiated when:
+ * - System startup
+ * - Lid is opened and then closed
+ * - Ordered station changes while moving
+ * - Fault recovery timeout
+ */
 void defineCalibrationState(FSMController& fsm) {
     static FSMStateID fsmNextState = STATE_NONE;
     
     FSMState state;
     state.onEnter = []() {
 
-        // buzzer.playEventWait(BUZZ_CALIB); // Play "Connected" sound
-
         // Ensure a valid Ordered station is set, or default to FULL
+        checkAndReportStatus( true , "CAL");   // Periodic status report
 
-        if ( halMgr1.getOrderedStation() != FLAG_FULL && halMgr1.getOrderedStation() != FLAG_HALF ) {
-            halMgr1.setOrderedStation(FLAG_FULL);  // Default to FULL station
+
+        if ( halMgr1.getOrderedStation() == FLAG_STOP ) {
+            halMgr1.setActualStation(FLAG_STOP); // Immediate effect
+            if ( halMgr1.isRunning() ) halMgr1.stopMotor( FLAG_MOVE_CANCELLED );  // Stop the motor if it is running
+            fsmNextState = STATE_ON_STATION;  // Go to ON_STATION state
+            return;
+        } else {
+            if ( halMgr1.getOrderedStation() != FLAG_FULL && halMgr1.getOrderedStation() != FLAG_HALF ) {
+
+                halMgr1.setOrderedStation(FLAG_FULL);  // Default to FULL station
+            }
         }
 
         // If only one sensor is present, set the station accordingly
@@ -108,9 +128,13 @@ void defineMovingToStationState(FSMController& fsm) {
         }
         FlagStation ordered = halMgr1.getOrderedStation();
         if (ordered == FLAG_HALF) {
+            checkAndReportStatus( true , "MOV");   // Periodic status report
             halMgr1.runMotor(CW, 120000, 255, 1500); // Move down to HALF
+
         } else if (ordered == FLAG_FULL) {
+            checkAndReportStatus( true , "MOV");   // Periodic status report
             halMgr1.runMotor(CCW, 120000, 255, 1500); // Move up to FULL
+
         }
     };    
 
@@ -149,6 +173,8 @@ void defineMovingToStationState(FSMController& fsm) {
 
 void defineLidOpenState(FSMController& fsm) {
     static FSMStateID fsmNextState = STATE_NONE;
+    static unsigned long lidClosedStart = 0;
+    static unsigned long lidClosedBeep = 0;
 
     FSMState state;
     state.onEnter = []() {
@@ -159,16 +185,40 @@ void defineLidOpenState(FSMController& fsm) {
         halMgr1.invalidateStation();  // reset position
         // report lid opening to host
         buzzer.playEvent(BUZZ_STOP);  // Play a sound to indicate lid is open
+        checkAndReportStatus( true , "LID");   // Periodic status report
+
     };
+
     state.onUpdate = []() {
-        if (lidSensor.isPresent()) {
-            fsmNextState = STATE_CALIBRATION;
+
+    /*      Implemented 10s of beeps before activating unit after lid closeure.
+     *      If lid re-opens, reset the timer.
+     */
+    if (lidSensor.isPresent()) {
+        if (lidClosedStart == 0) {
+            lidClosedStart = millis();  // start timing
+            lidClosedBeep = millis(); // 1s beep
+            buzzer.playEvent(BUZZ_LID_START);  // Play a sound to indicate lid is closed
+        } else if ( (millis() - lidClosedStart) >= 10000) {
+            lidClosedStart = 0;  // reset if lid opens again
+            fsmNextState = STATE_CALIBRATION;  // 10s elapsed
+        } else if ( (millis() - lidClosedStart) >= 9000) {
+            buzzer.playEvent(BUZZ_LID_END);  // Play a sound to indicate unit is activating
+        } else if ( (millis() - lidClosedBeep) >= 1000) {
+            lidClosedBeep += 1000; // increment for next beep time
+            if ( (millis() - lidClosedStart) < 7000) {
+                buzzer.playEvent(BUZZ_HIGHTICK);  // Play tick - count off 10 seconds
+            } else {
+                buzzer.playEvent(BUZZ_HIGHTICK2);  // Play double-tick - getting close
+            }
         }
-    };
-    state.onExit = []() {
-        // report lid closing to host
-        // Serial.println("Lid closed – resuming");
-    };
+    } else {
+        lidClosedStart = 0;  // reset if lid opens again
+        lidClosedBeep = 0;  // reset if lid opens again
+    }
+};
+
+    state.onExit = []() {};
     state.shouldAdvance = []() -> FSMStateID { return fsmNextState; };
     fsm.addState(STATE_LID_OPEN, state);
 }
@@ -180,15 +230,14 @@ void defineFaultRecoveryState(FSMController& fsm) {
     FSMState state;
     state.onEnter = []() {
         fsmNextState = STATE_NONE;
-        // buzzer.playEventWait(BUZZ_FAULT_RECOVERY);
-
-        // Serial.println("ERROR: Entering FIX_ME");
         buzzer.playEvent(BUZZ_FAULT_RECOVERY);  // Play fault recovery sound
         _fixMeStartTime = millis();  // Record the start time for the fault recovery    
+        checkAndReportStatus( true , "FLT");   // Periodic status report
+
     };
     
     state.onUpdate = []() {
-        if ( ( millis() - _fixMeStartTime ) > 30000UL ) { // 30 seconds timeout
+        if ( ( millis() - _fixMeStartTime ) > 900000UL ) { // 15 min timeout
             fsmNextState = STATE_CALIBRATION;  // If no resolution, return to calibration
         }
     };

@@ -20,12 +20,13 @@ enum BuzzerEvent {
     BUZZ_CALIB,  // Calibration sound
     BUZZ_MOVING_TO_STATION,  // Sound when moving to station
     BUZZ_LID_OPEN,  // Sound when lid is open
+    BUZZ_LID_START, // Begin 10s lid closed countdown
+    BUZZ_LID_BEEP,  // Beep during lid closed countdown
+    BUZZ_LID_END,   // Lid closed countdown ended
     BUZZ_FAULT_RECOVERY,  // Sound for fault recovery    
-    BUZZ_DEBUG_1,
-    BUZZ_DEBUG_2,
-    BUZZ_DEBUG_3,
-    BUZZ_DEBUG_4,
+    BUZZ_ID_TONES,  // Play ID tones for debugging
     BUZZ_HIGHTICK,
+    BUZZ_HIGHTICK2,
     BUZZ_SILENT_1S
 };
 

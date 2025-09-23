@@ -82,7 +82,7 @@ void BuzzerManager::playEvent(BuzzerEvent event) {
             playPattern("11134", "g.g.C");  // dit-dit, HIGH
             break;
         case BUZZ_STOP:
-            playPattern("2224", "ccca");  // Three descending sequences
+            playPattern("2224", "ccca");  // dot-dot-dot, LOW
             break;
         case BUZZ_STARTUP:  // Startup sound
             playPattern("44114", "cc.B.");  // Low, then one high note
@@ -91,7 +91,7 @@ void BuzzerManager::playEvent(BuzzerEvent event) {
             playPattern("441114", "cc.BB.");  // Low, then two high notes
             break;
         case BUZZ_CALIB:  // Calibration sound
-            playPattern("4411114", "cc.BBB.");  // Low, then three high notes
+            playPattern("443322111", "c.d.e.FFF");  // Slower at start, faster & higher at end
             break;
         case BUZZ_MOVING_TO_STATION:  // Sound when moving to station
             playPattern("44111114", "cc.BBBB.");  // Low, then four high notes
@@ -99,27 +99,28 @@ void BuzzerManager::playEvent(BuzzerEvent event) {
         case BUZZ_LID_OPEN:  // Sound when lid is open
             playPattern("441111114", "cc.BBBBB.");  // Low, then five high notes
             break;
+        case BUZZ_LID_START:  // Begin 10s lid closed countdown
+            playPattern("111", "DEF");  // three high notes
+            break;
+        case BUZZ_LID_BEEP:  // Countdown beep during lid closed countdown
+            playPattern("1", "A");  // three short medium-high note
+            break;
+        case BUZZ_LID_END:  // End of lid closed countdown
+            playPattern("11111", "abcde");  // five high notes
+            break;
         case BUZZ_FAULT_RECOVERY:  // Sound for fault recovery
             playPattern("4411111114", "cc.BBBBBB.");  // Low, then six high notes
             break;
-        case BUZZ_DEBUG_1:
-            // playPattern("442144", "aa.e..");  // Two lows, then debug count
-            playPattern("1", "c");  // Two lows, then debug count
-            break;
-            case BUZZ_DEBUG_2:
-            // playPattern("4421144", "aa.ee..");  // Two lows, then debug count
-            playPattern("1", "f");  // Two lows, then debug count
-            break;
-            case BUZZ_DEBUG_3:
-            // playPattern("44211144", "aa.eee..");  // Two lows, then debug count
-            playPattern("1", "C");  // Two lows, then debug count
-            break;
-        case BUZZ_DEBUG_4:  
-            playPattern("442111144", "aa.eeee..");  // Two lows, then debug count
+        case BUZZ_ID_TONES:  // Play ID tones for debugging
+            playPattern("1111112", "c.f.Afc");  // Start of reveille - identifier tones
             break;
         case BUZZ_HIGHTICK:
             // High-pitched tick sound for timing
             playPattern("1", "A");  // Single high note
+            break;
+        case BUZZ_HIGHTICK2:
+            // High-pitched tick sound doubled for timing
+            playPattern("111", "A.A");  // Double high note
             break;
         case BUZZ_SILENT_1S:
             playPattern("4444", "....");  // No sound, just silence

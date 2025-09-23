@@ -1,6 +1,8 @@
 #include "HalyardManager.h"
 #include "BuzzerManager.h"
 #include "sensors/Sensor.h"
+#include "EEPROMManager.h"
+#include "FlagUtils.h"
 
 float _stallLimitAmps = 1.8;
 #define CURRENT_SENSOR_SCALE 2.0  // Example: 5A per volt
@@ -9,6 +11,7 @@ extern BuzzerManager buzzer;
 extern Sensor lidSensor;        // Lid sensor 
 extern Sensor halfSensor;       // Half marker 
 extern Sensor fullSensor;       // Full marker 
+extern HalyardManager halMgr1;  // Forward declaration for the global instance
 
 void HalyardManager::begin() {
   pinMode(_dirPin, OUTPUT);
@@ -23,6 +26,7 @@ void HalyardManager::begin() {
   invalidateStation();  // Start with unknown station
   _isRunning = false;  // Motor is initially stopped
   _stall = false;  // No stall condition at startup
+  _forced = FLAG_UNKNOWN;  // No forced station at startup
 }
 void HalyardManager::runMotor(Direction dir, unsigned long durationMs, uint8_t targetSpeed, unsigned long rampTimeMs) {
   
@@ -58,14 +62,27 @@ void HalyardManager::runMotor(Direction dir, unsigned long durationMs, uint8_t t
   _stall = false;  // Reset stall condition when starting motor}
 }
 
+void HalyardManager::setForcedStation(FlagStation s, unsigned long expiration ) {
+  _forced = s;
+  _forcedBeginning = millis();  // Record the time when the forced station was set
+  _forcedDuration = expiration;  // Set the expiration time for the forced station
+  // Serial.printf("Forced station set to %d, expires at %lu\n", _forced, _forcedDuration);
+}
 void HalyardManager::update() {
+
+  if (_forced != FLAG_UNKNOWN && millis() >= _forcedBeginning + _forcedDuration) {
+    // If the forced station has expired, reset it
+    _forced = FLAG_UNKNOWN;
+    _forcedBeginning = 0;
+    _forcedDuration = 0;
+    // Serial.println("Forced station expired.");
+  }
+
   if (_isRunning) {
     
     // 1. Stall check first
-    float voltage = analogRead(_currentSensePin) * (3.3 / 4095.0);
-    float amps = voltage * CURRENT_SENSOR_SCALE;
 
-    if (amps >= _stallLimitAmps) {
+    if (getSmoothedAmps() >= _stallLimitAmps) {
       _stall = true;
       stopMotor( FLAG_MOVE_STALL );  // Stop motor on stall condition
       // Log.error("STALL detected: %.2f A", amps);
@@ -107,6 +124,20 @@ void HalyardManager::update() {
   }
 }
 
+float HalyardManager::getInputVoltage(){
+  /*
+  *  Analog to digital conversion with factor of 11 
+  *      (actual voltage is 11 times the observed voltage at the INPUT_VOLT_SENSE_PIN)
+  * 
+  *  Voltage measurement circuit:
+  * 
+  *                  measure here (10/11 of voltage is "spent")
+  *                             |
+  *    V(in) --[100K resistor]--+--[10K resistor]--||| (ground)
+  */
+ return ADC_TO_VOLT(analogRead(INPUT_VOLT_SENSE_PIN)) * INPUT_VOLT_SCALE_FAC ;
+}
+
 void HalyardManager::stopMotor( FlagMoveStatus status ) {
   digitalWrite(_enablePin, LOW);
   analogWrite(_pwmPin, 0);
@@ -115,11 +146,40 @@ void HalyardManager::stopMotor( FlagMoveStatus status ) {
   _rampActive = false;  // Stop any active ramping
 }
 
+void HalyardManager::setOrderedStation(FlagStation s) {
+  _ordered = s;
+  saveOSTA(_ordered);
+}
+
 FlagStation HalyardManager::getActualStation() {  // Return the actual station only if the marker is present
+  
+  if ( _actual == FLAG_STOP ) {
+    return _actual;  // Always return STOP if that's the actual station
+  }
+  
   if ( ( _actual == FLAG_HALF && !halfSensor.isPresent() ) ||
-       ( _actual == FLAG_FULL && !fullSensor.isPresent() )    ) {
+  ( _actual == FLAG_FULL && !fullSensor.isPresent() )    ) {
     setActualStation(FLAG_UNKNOWN);  // If marker is not present, reset actual station
   }
   return _actual;  
 }
 
+float HalyardManager::getMotorCurrent() {        // Read the ADC connected to the motor current sensor
+    // return MOTOR_AMP_READING(analogRead(MOTOR_CURRENT_PIN));
+    return ADC_TO_VOLT(analogRead(MOTOR_CURRENT_PIN)) * MOTOR_VOLT_TO_AMP_FAC;
+}
+
+
+// Update the smoothed value (geometric moving average)
+void HalyardManager::updateSmoothedAmps() {
+    double inst = getMotorCurrent();
+    if (_smoothedAmps <= 0.0) {
+        _smoothedAmps = inst;
+    } else {
+        _smoothedAmps = _smoothedAmps * (1.0 - _alpha) + inst * _alpha;
+    }
+}
+
+float HalyardManager::getSmoothedAmps()  {
+    return _smoothedAmps;
+}
