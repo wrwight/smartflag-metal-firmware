@@ -6,6 +6,16 @@
 #include "HalyardManager.h"
 #include "BuzzerManager.h"
 
+enum FSMEvent {
+    EVENT_NONE = 0,
+    EVENT_LID_OPEN,
+    EVENT_LID_CLOSED,
+    EVENT_FAULT,
+    EVENT_FLAG_AT_FULL,
+    EVENT_FLAG_AT_HALF
+    // … add more as needed
+};
+
 enum FSMStateID {
     STATE_NONE = 0,
     STATE_STARTUP,
@@ -25,16 +35,24 @@ public:
     std::function<FSMStateID()> shouldAdvance;
 };
 
+#define MAX_FSM_EVENTS 10
 class FSMController {
-    private:
+private:
     FSMState _states[STATE_MAX];
     FSMStateID _current = STATE_NONE;
-    
-    public:
+    FSMEvent eventQueue[MAX_FSM_EVENTS];
+    int head = 0;
+    int tail = 0;
+     
+public:
     void addState(FSMStateID id, const FSMState& state);
     void begin(FSMStateID initial);
+    void enqueueEvent(FSMEvent evt);
+    FSMEvent nextEvent();
     void update();
     FSMStateID currentState() const;
+    
+     
 };
 
 // State registration

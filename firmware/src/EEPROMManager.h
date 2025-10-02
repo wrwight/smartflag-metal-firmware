@@ -42,7 +42,8 @@ struct ConfigData {
     float STD;           // TZOffset (float)            // JSON: STD
     bool DST;            // doDST (boolean)             // JSON: DST
     char MOD[3];         // modelType (2-letter String) // JSON: MOD
-    uint8_t reserved[21];// Padding to make 64 bytes
+    bool CRS;            // currentStudy (boolean)      // JSON: CRS
+    uint8_t reserved[20];// Padding to make 64 bytes
 };
 
 // --- StatusData ---

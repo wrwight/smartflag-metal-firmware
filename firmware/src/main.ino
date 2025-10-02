@@ -14,7 +14,7 @@
 /**************/
 // Define product ID and version for Particle Cloud
 // PRODUCT_ID(38638) // Unique product ID for SmartFlag-Gen3 (discontinued after 4.0.0)
-PRODUCT_VERSION(2) // Incremented for EEPROM version 2
+PRODUCT_VERSION(3) // Incremented for multi-beep version 3
 
 // // Thermistor coefs                                 These values may need to be tuned
 // #define NTC_NOMINAL_RESISTANCE                      10000
@@ -111,9 +111,7 @@ void loop() {
     buzzer.update();
     
     if ( !lidSensor.isPresent() && fsm.currentState() != STATE_LID_OPEN ) { // If the lid just opened
-        fsm.begin(STATE_LID_OPEN); // Interrupt current state and go to LID_OPEN
-    // } else if (lidSensor.isPresent() && fsm.currentState() == STATE_LID_OPEN) {
-    //     fsm.begin(STATE_CALIBRATION); // Must calibrate again
+        fsm.enqueueEvent(EVENT_LID_OPEN);
     }
     
     halMgr1.update();       // Update the halyard manager state

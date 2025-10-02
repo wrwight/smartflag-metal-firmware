@@ -15,6 +15,37 @@ extern Sensor lidSensor;        // Lid sensor
 extern Sensor halfSensor;       // Half marker 
 extern Sensor fullSensor;       // Full marker 
 
+// ==== Current Study globals for FSM ====
+static float currentSamples[200];
+static int currentSampleIndex = 0;
+static Timer* currentStudyTimer = nullptr;
+
+// Configurable flag (assume you load this from EEPROM/config system)
+extern bool CRS;  
+
+// Helper: sample smoothed amps
+void recordCurrentSample() {
+    if (currentSampleIndex < 200) {
+        currentSamples[currentSampleIndex++] = halMgr1.getSmoothedAmps();
+    }
+}
+
+// Helper: initiate current study
+void startCurrentStudy() {
+    // Reset study array
+    for (int i = 0; i < 200; i++) {
+        currentSamples[i] = 0.0f;
+    }
+    currentSampleIndex = 0;
+
+    // Create timer if not already
+    if (!currentStudyTimer) {
+        int timerDuration = 250; // change to 1000 for production
+        currentStudyTimer = new Timer(timerDuration, recordCurrentSample); // 1 second
+    }
+    currentStudyTimer->start();
+}
+
 void defineStartupState(FSMController& fsm) {
     static FSMStateID fsmNextState = STATE_NONE;
 
@@ -120,6 +151,7 @@ void defineMovingToStationState(FSMController& fsm) {
 
     FSMState state;
     state.onEnter = []() {
+
         fsmNextState = STATE_NONE;
         // Move motor UP or DOWN to reach the station
         if ( halMgr1.getActualStation() == halMgr1.getOrderedStation() ) {
@@ -129,10 +161,12 @@ void defineMovingToStationState(FSMController& fsm) {
         FlagStation ordered = halMgr1.getOrderedStation();
         if (ordered == FLAG_HALF) {
             checkAndReportStatus( true , "MOV");   // Periodic status report
+            startCurrentStudy();  // Start current study if CRS is enabled
             halMgr1.runMotor(CW, 120000, 255, 1500); // Move down to HALF
-
+            
         } else if (ordered == FLAG_FULL) {
             checkAndReportStatus( true , "MOV");   // Periodic status report
+            startCurrentStudy();  // Start current study if CRS is enabled
             halMgr1.runMotor(CCW, 120000, 255, 1500); // Move up to FULL
 
         }
@@ -164,7 +198,55 @@ void defineMovingToStationState(FSMController& fsm) {
         }
     };    
 
-    state.onExit = []() {};
+    // state.onExit = []() {};
+ 
+    state.onExit = []() {
+        if (currentStudyTimer) {
+            currentStudyTimer->stop();
+        }
+
+        int duration = currentSampleIndex; // seconds == # of samples
+        if (duration == 0) return;
+
+        // Calculate stats
+        int count = 0;
+        double sum = 0;
+        float maxVal = 0;
+        int maxIndex = -1;
+
+        for (int i = 0; i < duration; i++) {
+            float v = currentSamples[i];
+            if (v > 0.0f) {
+                count++;
+                sum += v;
+            }
+            if (v > maxVal) {
+                maxVal = v;
+                maxIndex = i;
+            }
+        }
+
+        double avg = (count > 0) ? sum / count : 0;
+
+        // Collect up to 4 preceding values before max
+        String preceding = "";
+        if (maxIndex >= 0) {
+            int start = max(0, maxIndex - 3);
+            for (int i = start; i <= maxIndex; i++) {
+                preceding += String(currentSamples[i], 2);
+                if (i < maxIndex) preceding += ",";
+            }
+        }
+
+        // Publish if enabled
+        // if (CRS) {
+            Particle.publish("CurrentStudy",
+                String::format("Dur:%d Avg:%.2f Cnt:%d Max:%.2f Seq:%s",
+                            duration, avg, count, maxVal, preceding.c_str()),
+                PRIVATE);
+        // }
+    };
+
     state.shouldAdvance = []() -> FSMStateID {
         return fsmNextState;
     };    
@@ -274,6 +356,24 @@ void FSMController::begin(FSMStateID initial) {
 void FSMController::update() {
     if (_current == STATE_NONE || _current >= STATE_MAX) return;
     FSMState& state = _states[_current];
+
+    // Process queued events
+    FSMEvent evt = nextEvent();
+    while (evt != EVENT_NONE) {
+        // Option 1: direct override for urgent events
+        if (evt == EVENT_LID_OPEN) {
+            if (state.onExit) state.onExit();
+            _current = STATE_LID_OPEN;
+            if (_states[_current].onEnter) _states[_current].onEnter();
+            return;
+        }
+        // // Option 2: let state handle events
+        // if (state.onEvent) state.onEvent(evt);  // you can add onEvent handler to FSMState
+        evt = nextEvent();
+    }
+
+    
+
     if (state.onUpdate) state.onUpdate();
     if (state.shouldAdvance) {
         FSMStateID next = state.shouldAdvance();
@@ -287,4 +387,23 @@ void FSMController::update() {
 
 FSMStateID FSMController::currentState() const {
     return _current;
+}
+
+void FSMController::enqueueEvent(FSMEvent evt) {
+    int nextHead = (head + 1) % MAX_FSM_EVENTS;
+    if (nextHead != tail) {   // queue not full
+        eventQueue[head] = evt;
+        head = nextHead;
+    } else {
+        buzzer.playEvent(BUZZ_HIGHTICK2); // Queue full, play error sound
+    }
+}
+
+FSMEvent FSMController::nextEvent() {
+    if (head == tail) {
+        return EVENT_NONE;  // queue empty
+    }
+    FSMEvent evt = eventQueue[tail];
+    tail = (tail + 1) % MAX_FSM_EVENTS;
+    return evt;
 }
