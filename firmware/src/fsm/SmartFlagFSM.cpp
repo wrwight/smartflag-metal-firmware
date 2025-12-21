@@ -366,6 +366,11 @@ void FSMController::update() {
             _current = STATE_LID_OPEN;
             if (_states[_current].onEnter) _states[_current].onEnter();
             return;
+        } else if ( evt == EVENT_CLEAR_FAULT ) {
+            if (state.onExit) state.onExit();
+            _current = STATE_CALIBRATION;
+            if (_states[_current].onEnter) _states[_current].onEnter();
+            return;
         }
         // // Option 2: let state handle events
         // if (state.onEvent) state.onEvent(evt);  // you can add onEvent handler to FSMState

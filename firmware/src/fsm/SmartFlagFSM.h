@@ -11,6 +11,7 @@ enum FSMEvent {
     EVENT_LID_OPEN,
     EVENT_LID_CLOSED,
     EVENT_FAULT,
+    EVENT_CLEAR_FAULT,
     EVENT_FLAG_AT_FULL,
     EVENT_FLAG_AT_HALF
     // … add more as needed

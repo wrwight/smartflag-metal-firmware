@@ -14,12 +14,20 @@
 /**************/
 // Define product ID and version for Particle Cloud
 // PRODUCT_ID(38638) // Unique product ID for SmartFlag-Gen3 (discontinued after 4.0.0)
-PRODUCT_VERSION(3) // Incremented for multi-beep version 3
+PRODUCT_VERSION(4) // Incremented for version 4 (external function to clear faults safely)
 
 // // Thermistor coefs                                 These values may need to be tuned
 // #define NTC_NOMINAL_RESISTANCE                      10000
 // #define NTC_BETA                                    3425    // 3401 to 3450 with +- 1% tol
 // #define NTC_SERRIES_RESISTANCE                      10000
+
+// Forward declarations
+int remoteClearFault(String arg);
+void serviceRemoteRequests();
+
+// Remote request latch
+static volatile bool g_clearFaultRequested = false;
+static String g_clearFaultArg = "";
 
 const int DIR_PIN = D5;  // Direction pin for motor
 const int PWM_PIN = D6;  // PWM pin for motor speed control
@@ -97,6 +105,7 @@ void setup() {
     Particle.function("OrderHFS", setStation); // Set ordered station
     Particle.function("PlayID", playIDTones); // Play ID tones for debugging
     Particle.function("SetConfig", setConfigHandler);
+    Particle.function("clearFault", remoteClearFault);
 
     Particle.variable("Config", configToJSON );
     // Particle.variable("Status", statusVar ); // Use lambda to capture current status
@@ -117,6 +126,7 @@ void loop() {
     halMgr1.update();       // Update the halyard manager state
     fsm.update();           // Update the FSM state machine
     checkAndReportStatus( false , "RPT");   // Periodic status report
+    serviceRemoteRequests();
 }
 
 int setHALF(String duration) {
@@ -127,6 +137,77 @@ int setHALF(String duration) {
 int setFULL(String duration) {
     halMgr1.setForcedStation(FLAG_FULL, validateDuration(duration)); // Set forced station with provided duration
     return 0; // Success
+}
+
+int remoteClearFault(String arg) {
+  // Accept simple args:
+  // "" or "ALL"  -> clear all
+  // "STALL"      -> clear just that (optional)
+  // "TIMEOUT"    -> clear just that (optional)
+
+  g_clearFaultArg = arg;
+  g_clearFaultRequested = true;
+
+  return 1; // accepted
+}
+
+static bool isSafeToClearFault() {
+  // Replace these with your real checks.
+  // Aim: DO NOT clear if the halyard is moving or lid is open.
+
+  bool lidClosed = true;
+  bool motorInactive = true;
+  bool fsmIdle = true;
+
+  // Examples (adjust to your APIs):
+  lidClosed = lidSensor.isPresent();
+  motorInactive = !halMgr1.isRunning();
+//   fsmIdle = fsm.isInIdleState();
+
+  return lidClosed && motorInactive && fsmIdle;
+}
+
+void serviceRemoteRequests() {
+  if (!g_clearFaultRequested) return;
+
+  if (!isSafeToClearFault()) {
+    // Decide whether to keep the request latched (try again later)
+    // or reject it outright. I recommend rejecting to avoid surprise behavior.
+    Particle.publish("ClearFault", "Rejected:not-safe", PRIVATE);
+    g_clearFaultRequested = false;
+    g_clearFaultArg = "";
+    return;
+  }
+
+  fsm.enqueueEvent(EVENT_CLEAR_FAULT);
+
+//   String arg = g_clearFaultArg;
+//   arg.trim();
+//   arg.toUpperCase();
+
+//   bool ok = true;
+
+//   // --- Clear logic (choose what your FaultManager supports) ---
+//   if (arg.length() == 0 || arg == "ALL") {
+//     // Most common: clear all faults
+//     faultMgr.clearAll();   // <-- rename to your actual method
+//   } else if (arg == "STALL") {
+//     ok = faultMgr.clearByCode(FAULT_STALL);  // optional
+//   } else if (arg == "TIMEOUT") {
+//     ok = faultMgr.clearByCode(FAULT_TIMEOUT); // optional
+//   } else {
+//     ok = false;
+//   }
+
+//   if (ok) {
+//     Particle.publish("ClearFault", "OK", PRIVATE);
+//   } else {
+//     Particle.publish("ClearFault", "Rejected:bad-arg", PRIVATE);
+//   }
+
+  // Consume request
+  g_clearFaultRequested = false;
+  g_clearFaultArg = "";
 }
 
 unsigned long validateDuration(const String& duration) {
