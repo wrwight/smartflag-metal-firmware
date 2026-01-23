@@ -1,4 +1,5 @@
 #include "Particle.h"
+#include "ConfigDefaults.h"
 #include "EEPROMManager.h"
 #include "HalyardManager.h"
 #include "FlagUtils.h"
@@ -48,24 +49,15 @@ void initEEPROM() {
     };
     EEPROM.put(EEPROM_ADDR_HEADER, hdr);
 
-    ConfigData cfg = {0};
-    strncpy(cfg.FLG, "US", sizeof(cfg.FLG));
-    cfg.FPR = 1;
-    cfg.LAT = 0.0;
-    cfg.LNG = 0.0;
-    strncpy(cfg.FED, "FE-US", sizeof(cfg.FED));
-    strncpy(cfg.STA, "FE-XX", sizeof(cfg.STA));
-    strncpy(cfg.ZIP, "", sizeof(cfg.ZIP));
-    cfg.STD = -5.0;
-    cfg.DST = true;
-    strncpy(cfg.MOD, "G3", sizeof(cfg.MOD));
+    ConfigData cfg = ConfigDefaults::makeDefaultConfig();
     EEPROM.put(EEPROM_ADDR_CONFIG, cfg);
 
     StatusData status = {};  // Zero-initialize the whole struct
+    status.reboot_count = 0;
     strcpy(status.AEID, ""); // Explicitly assign empty string
     status.OSTA = FLAG_UNKNOWN;
     status.NEXT = 0;
-    status.EVLD = false;
+    status.EVLD = 0;
     // strcpy(status.MVST, "NONE");
     // status.VLTS = 0.0f;
     // status.AMPS = 0.0f;
@@ -81,14 +73,83 @@ void initEEPROM() {
     Log.info("EEPROM initialized with magic 'G3'.");
 }
 
+static uint8_t maxEventsInEEPROM() {
+    int upperBound = EEPROM_ADDR_CFGX;  // CFGX starts here
+    int bytesAvailable = upperBound - EEPROM_ADDR_EVENT_LIST;
+    if (bytesAvailable <= 0) return 0;
+    return (uint8_t)(bytesAvailable / (int)sizeof(FlagEvent));
+}
+
 bool migrateEEPROM(uint8_t oldVersion) {
-    if (oldVersion == 1) {
-        Log.info("Migration logic not yet implemented. Reinitializing.");
+
+    if (oldVersion == 1 && EEPROM_VERSION == 2) {
+
+        // Read existing data from v1 layout
+        ConfigData cfg_v1;
+        EEPROM.get(EEPROM_ADDR_CONFIG, cfg_v1);
+
+        StatusData st_v1;
+        EEPROM.get(EEPROM_ADDR_STATUS, st_v1);
+
+        EventHeader eh;
+        EEPROM.get(EEPROM_ADDR_EVENT_HDR, eh);
+
+        // Read event list (bounded)
+        uint8_t maxEv = maxEventsInEEPROM();
+        uint8_t count = eh.eventCount;
+        if (count > maxEv) count = maxEv;
+
+        FlagEvent* events = nullptr;
+        if (count > 0) {
+            events = new FlagEvent[count];
+            for (uint8_t i = 0; i < count; i++) {
+                int addr = EEPROM_ADDR_EVENT_LIST + i * sizeof(FlagEvent);
+                EEPROM.get(addr, events[i]);
+            }
+        }
+
+        // Re-init EEPROM with new header/version/layout
         initEEPROM();
+
+        // Restore preserved data
+        EEPROM.put(EEPROM_ADDR_CONFIG, cfg_v1);
+
+        // For v2: keep everything we read, and ensure new field is initialized.
+        // In v1, reboot_count bytes would have been part of reserved, likely 0.
+        // We still enforce explicit init here.
+        st_v1.reboot_count = 0;
+        EEPROM.put(EEPROM_ADDR_STATUS, st_v1);
+
+        eh.eventCount = count; // ensure bounded
+        EEPROM.put(EEPROM_ADDR_EVENT_HDR, eh);
+
+        if (events && count > 0) {
+            for (uint8_t i = 0; i < count; i++) {
+                int addr = EEPROM_ADDR_EVENT_LIST + i * sizeof(FlagEvent);
+                EEPROM.put(addr, events[i]);
+            }
+            delete[] events;
+        }
+
+        // Publish debug (forced) so you can confirm migration happened
+        SFDBG::pub("EEP", "Migrated v1->v2 (preserved cfg/status/events)", true);
         return true;
     }
-    Log.error("Unrecognized EEPROM version %d. Aborting.", oldVersion);
+
+    // Unknown migration path
+    SFDBG::pub("EEP", String::format("No migration path from v%u to v%u", oldVersion, EEPROM_VERSION), true);
     return false;
+}
+
+void bumpRebootCount() {
+    StatusData st;
+    EEPROM.get(EEPROM_ADDR_STATUS, st);
+
+    st.reboot_count += 1;
+    st.TIME = Time.now();               // optional: treat as write time
+    EEPROM.put(EEPROM_ADDR_STATUS, st);
+
+    // SFDBG::pub("BOOT", String::format("reboot_count=%lu", (unsigned long)st.reboot_count), true);
 }
 
 // ====================
@@ -96,6 +157,17 @@ bool migrateEEPROM(uint8_t oldVersion) {
 // ====================
 void readConfig(ConfigData &cfg) {
     EEPROM.get(EEPROM_ADDR_CONFIG, cfg);
+
+    bool changed = false;
+    changed |= ConfigDefaults::applyDefaults(cfg);
+    changed |= ConfigDefaults::validateAndClamp(cfg);
+
+    // Optional but recommended: write back repaired config so it persists.
+    if (changed) {
+        writeConfig(cfg);
+        Log.info("Config repaired (defaults/clamp) and written back to EEPROM.");
+        SFDBG::pub("CFG", "repaired+writeback");
+    }
 }
 
 void writeConfig(const ConfigData &cfg) {
@@ -113,6 +185,66 @@ static const char* moveStatusToCode(FlagMoveStatus status) {
         case FLAG_MOVE_STALL:      return "STAL";
         default:                   return "UNKN";
     }
+}
+
+void initConfigExt() {
+    ConfigExt x = {};
+    x.magic = CFGX_MAGIC;
+    x.version = CFGX_VERSION;
+    x.flags = 0;
+
+    x.stall_limit_ma = 1800;     // default 1800 mA
+    x.move_timeout_sec = 120;    // default 120 sec
+
+    EEPROM.put(EEPROM_ADDR_CFGX, x);
+    SFDBG::pub("CFGX", "init defaults", true);
+}
+
+void readConfigExt(ConfigExt &x) {
+    EEPROM.get(EEPROM_ADDR_CFGX, x);
+}
+
+void writeConfigExt(const ConfigExt &x) {
+    EEPROM.put(EEPROM_ADDR_CFGX, x);
+}
+
+static bool clampConfigExt(ConfigExt &x) {
+    bool changed = false;
+
+    // stall_limit_ma: clamp to reasonable bounds
+    if (x.stall_limit_ma < 200)  { x.stall_limit_ma = 200;  changed = true; }
+    if (x.stall_limit_ma > 5000) { x.stall_limit_ma = 5000; changed = true; }
+
+    // move_timeout_sec: clamp to reasonable bounds
+    if (x.move_timeout_sec < 10)   { x.move_timeout_sec = 10;   changed = true; }
+    if (x.move_timeout_sec > 600)  { x.move_timeout_sec = 600;  changed = true; }
+
+    return changed;
+}
+
+bool validateOrInitConfigExt() {
+    ConfigExt x;
+    readConfigExt(x);
+
+    if (x.magic != CFGX_MAGIC || x.version != CFGX_VERSION) {
+        initConfigExt();
+        return true;
+    }
+
+    bool changed = false;
+
+    // defaults if unset
+    if (x.stall_limit_ma == 0) { x.stall_limit_ma = 1800; changed = true; }
+    if (x.move_timeout_sec == 0) { x.move_timeout_sec = 120; changed = true; }
+
+    changed |= clampConfigExt(x);
+
+    if (changed) {
+        writeConfigExt(x);
+        SFDBG::pub("CFGX", "repaired+clamped", true);
+    }
+
+    return true;
 }
 
 void readStatus(StatusData &status) {
@@ -161,8 +293,18 @@ String configToJSON() {
     ConfigData cfg;
     readConfig(cfg);
 
+    ConfigExt x;
+    readConfigExt(x);
+
+    // Ensure CFGX is initialized (safe, cheap)
+    if (x.magic != CFGX_MAGIC || x.version != CFGX_VERSION) {
+        initConfigExt();
+        readConfigExt(x);
+    }
+
     char buffer[256];
-    JSONBufferWriter writer(buffer, sizeof(buffer) - 1);
+    memset(buffer, 0, sizeof(buffer));               // optional but fine
+    JSONBufferWriter writer(buffer, sizeof(buffer)); // use full buffer size
 
     writer.beginObject();
     writer.name("FLG").value(cfg.FLG);
@@ -175,19 +317,39 @@ String configToJSON() {
     writer.name("STD").value(cfg.STD, 2);
     writer.name("DST").value(cfg.DST);
     writer.name("MOD").value(cfg.MOD);
+    writer.name("SPS").value(cfg.status_period_sec);
+    writer.name("MGS").value(cfg.force_report_min_gap_sec);
+
+    // --- ConfigExt additions ---
+    writer.name("SLM").value((int)x.stall_limit_ma);      // Stall Limit (mA)
+    writer.name("TMO").value((int)x.move_timeout_sec);    // Timeout (sec)
+
     writer.endObject();
 
-    buffer[writer.dataSize()] = 0;
-    return String(buffer);
+    // Lock down output length (prevents buffer tail artifacts)
+    size_t n = writer.bufferSize();   // if your build uses dataSize(), swap this line
+    if (n > sizeof(buffer)) n = sizeof(buffer);
+    if (n < sizeof(buffer)) buffer[n] = '\0';            // optional terminator
+
+    return String(buffer, n);
 }
 
 bool jsonToConfig(const String &jsonStr) {
     ConfigData cfg;
     readConfig(cfg);
 
+    ConfigExt x;
+    readConfigExt(x);
+
+    // If CFGX not initialized yet, fix it now (safe)
+    if (x.magic != CFGX_MAGIC || x.version != CFGX_VERSION) {
+        initConfigExt();
+        readConfigExt(x);
+    }
+
     JSONValue root = JSONValue::parseCopy(jsonStr);
     if (!root.isValid() || !root.isObject()) {
-        Log.error("Invalid JSON for config update");
+        SFDBG::pub("CFG", "Invalid JSON for config update", true);
         return false;
     }
 
@@ -199,6 +361,7 @@ bool jsonToConfig(const String &jsonStr) {
 
         if (strcmp(key, "FLG") == 0 && val.isString()) {
             strncpy(cfg.FLG, val.toString().data(), sizeof(cfg.FLG) - 1);
+            cfg.FLG[sizeof(cfg.FLG) - 1] = '\0';
         }
         else if (strcmp(key, "FPR") == 0 && val.isNumber()) {
             cfg.FPR = val.toInt();
@@ -211,12 +374,15 @@ bool jsonToConfig(const String &jsonStr) {
         }
         else if (strcmp(key, "FED") == 0 && val.isString()) {
             strncpy(cfg.FED, val.toString().data(), sizeof(cfg.FED) - 1);
+            cfg.FED[sizeof(cfg.FED) - 1] = '\0';
         }
         else if (strcmp(key, "STA") == 0 && val.isString()) {
             strncpy(cfg.STA, val.toString().data(), sizeof(cfg.STA) - 1);
+            cfg.STA[sizeof(cfg.STA) - 1] = '\0';
         }
         else if (strcmp(key, "ZIP") == 0 && val.isString()) {
             strncpy(cfg.ZIP, val.toString().data(), sizeof(cfg.ZIP) - 1);
+            cfg.ZIP[sizeof(cfg.ZIP) - 1] = '\0';
         }
         else if (strcmp(key, "STD") == 0 && val.isNumber()) {
             cfg.STD = val.toDouble();
@@ -226,10 +392,39 @@ bool jsonToConfig(const String &jsonStr) {
         }
         else if (strcmp(key, "MOD") == 0 && val.isString()) {
             strncpy(cfg.MOD, val.toString().data(), sizeof(cfg.MOD) - 1);
+            cfg.MOD[sizeof(cfg.MOD) - 1] = '\0';
         }
+        else if (strcmp(key, "SLM") == 0 && val.isNumber()) {
+            x.stall_limit_ma = (uint16_t)val.toInt();
+        }
+        else if (strcmp(key, "TMO") == 0 && val.isNumber()) {
+            x.move_timeout_sec = (uint16_t)val.toInt();
+        }
+
+        // === Step 3C additions (consistent with your current style) ===
+        // Long keys maintained for "backward compatibility" - should be able to eliminate later.
+        // Note: supplying values of 0 causes a reversion to the defaults/clamps in validateAndClamp().
+
+        else if ((strcmp(key, "SPS") == 0 || strcmp(key, "status_period_sec") == 0) && val.isNumber()) {
+            cfg.status_period_sec = (uint32_t)val.toInt();
+        }
+        else if ((strcmp(key, "MGS") == 0 || strcmp(key, "force_report_min_gap_sec") == 0) && val.isNumber()) {
+            cfg.force_report_min_gap_sec = (uint16_t)val.toInt();
+}
+
     }
 
+    ConfigDefaults::applyDefaults(cfg);         // ensure defaults for missing fields
+    ConfigDefaults::validateAndClamp(cfg);      // ensure valid ranges
+
     writeConfig(cfg);
+    bool changedX = clampConfigExt(x);
+    writeConfigExt(x);
+
+    if (changedX) {
+        SFDBG::pub("CFGX", "patched+clamped", true);
+    }
+
     return true;
 }
 
@@ -269,7 +464,7 @@ time_t parseUTC(const String& utcString) {
 // ====================
 int setConfigHandler(String data) {
     if (jsonToConfig(data)) {
-        // Log.info("Config updated via cloud: %s", configToJSON().c_str());
+        halMgr1.applyConfigExtToRuntime();
         return 1;
     }
     return -1;

@@ -4,7 +4,6 @@
 #include "EEPROMManager.h"
 #include "FlagUtils.h"
 
-float _stallLimitAmps = 1.8;
 #define CURRENT_SENSOR_SCALE 2.0  // Example: 5A per volt
 
 extern BuzzerManager buzzer;
@@ -57,9 +56,25 @@ void HalyardManager::runMotor(Direction dir, unsigned long durationMs, uint8_t t
   } else {
     _stopTime = millis() + durationMs;
   }
-  // _stopTime = millis() + durationMs;
   _isRunning = true;
   _stall = false;  // Reset stall condition when starting motor}
+}
+
+void HalyardManager::applyConfigExtToRuntime() {
+    ConfigExt x;
+    readConfigExt(x);
+
+    if (x.magic != CFGX_MAGIC || x.version != CFGX_VERSION) {
+        initConfigExt();
+        readConfigExt(x);
+    }
+
+    setStallLimitMa(x.stall_limit_ma);
+    setMoveTimeoutSec(x.move_timeout_sec);
+
+    SFDBG::pub("CFGX", String::format("applied SLM=%u TMO=%u",
+        (unsigned)x.stall_limit_ma,
+        (unsigned)x.move_timeout_sec));
 }
 
 void HalyardManager::setForcedStation(FlagStation s, unsigned long expiration ) {
@@ -68,6 +83,7 @@ void HalyardManager::setForcedStation(FlagStation s, unsigned long expiration ) 
   _forcedDuration = expiration;  // Set the expiration time for the forced station
   // Serial.printf("Forced station set to %d, expires at %lu\n", _forced, _forcedDuration);
 }
+
 void HalyardManager::update() {
 
   if (_forced != FLAG_UNKNOWN && millis() >= _forcedBeginning + _forcedDuration) {

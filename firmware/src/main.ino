@@ -14,7 +14,7 @@
 /**************/
 // Define product ID and version for Particle Cloud
 // PRODUCT_ID(38638) // Unique product ID for SmartFlag-Gen3 (discontinued after 4.0.0)
-PRODUCT_VERSION(4) // Incremented for version 4 (external function to clear faults safely)
+PRODUCT_VERSION(5) // Incremented for version 5 (status report cadence changes)
 
 // // Thermistor coefs                                 These values may need to be tuned
 // #define NTC_NOMINAL_RESISTANCE                      10000
@@ -93,7 +93,11 @@ void setup() {
         Log.error("EEPROM validation failed — running with defaults.");
         initEEPROM();
     }
-// Load Ordered Station from EEPROM
+    validateOrInitConfigExt();          // Configuration extension
+    halMgr1.applyConfigExtToRuntime();      // Apply extended config to runtime
+    bumpRebootCount();
+
+    // Load Ordered Station from EEPROM
     StatusData status;
     readStatus(status);
     halMgr1.setOrderedStation(status.OSTA);  // Set ordered station from EEPROM without saving again
@@ -106,6 +110,7 @@ void setup() {
     Particle.function("PlayID", playIDTones); // Play ID tones for debugging
     Particle.function("SetConfig", setConfigHandler);
     Particle.function("clearFault", remoteClearFault);
+    Particle.function("dbg", dbgToggle);
 
     Particle.variable("Config", configToJSON );
     // Particle.variable("Status", statusVar ); // Use lambda to capture current status
@@ -181,31 +186,6 @@ void serviceRemoteRequests() {
 
   fsm.enqueueEvent(EVENT_CLEAR_FAULT);
 
-//   String arg = g_clearFaultArg;
-//   arg.trim();
-//   arg.toUpperCase();
-
-//   bool ok = true;
-
-//   // --- Clear logic (choose what your FaultManager supports) ---
-//   if (arg.length() == 0 || arg == "ALL") {
-//     // Most common: clear all faults
-//     faultMgr.clearAll();   // <-- rename to your actual method
-//   } else if (arg == "STALL") {
-//     ok = faultMgr.clearByCode(FAULT_STALL);  // optional
-//   } else if (arg == "TIMEOUT") {
-//     ok = faultMgr.clearByCode(FAULT_TIMEOUT); // optional
-//   } else {
-//     ok = false;
-//   }
-
-//   if (ok) {
-//     Particle.publish("ClearFault", "OK", PRIVATE);
-//   } else {
-//     Particle.publish("ClearFault", "Rejected:bad-arg", PRIVATE);
-//   }
-
-  // Consume request
   g_clearFaultRequested = false;
   g_clearFaultArg = "";
 }

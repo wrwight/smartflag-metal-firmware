@@ -162,12 +162,12 @@ void defineMovingToStationState(FSMController& fsm) {
         if (ordered == FLAG_HALF) {
             checkAndReportStatus( true , "MOV");   // Periodic status report
             startCurrentStudy();  // Start current study if CRS is enabled
-            halMgr1.runMotor(CW, 120000, 255, 1500); // Move down to HALF
+            halMgr1.runMotor(CW, halMgr1.getMoveTimeoutSec() * 1000, 255, 1500); // Move down to HALF
             
         } else if (ordered == FLAG_FULL) {
             checkAndReportStatus( true , "MOV");   // Periodic status report
             startCurrentStudy();  // Start current study if CRS is enabled
-            halMgr1.runMotor(CCW, 120000, 255, 1500); // Move up to FULL
+            halMgr1.runMotor(CCW, halMgr1.getMoveTimeoutSec() * 1000, 255, 1500); // Move up to FULL
 
         }
     };    
