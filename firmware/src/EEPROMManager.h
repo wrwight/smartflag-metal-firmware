@@ -9,7 +9,12 @@
 // Constants
 // ====================
 #define EEPROM_MAGIC    0x4733  // 'G3'
-#define EEPROM_VERSION  1
+#define EEPROM_VERSION  2
+#define EEPROM_TOTAL_BYTES 2047
+
+#define CFGX_MAGIC   0xC0DE
+#define CFGX_VERSION 1
+#define EEPROM_ADDR_CFGX (EEPROM_TOTAL_BYTES - 64)   // 1983
 
 // EEPROM layout offsets
 #define EEPROM_ADDR_HEADER     0
@@ -21,6 +26,8 @@
 // ====================
 // Data Structures
 // ====================
+// IntelliSense may mis-evaluate sizeof() / alignment for EEPROM structs.
+// The Particle compiler is the source of truth.
 
 struct EEPROMHeader {
     uint16_t magic;         // Identifier
@@ -29,6 +36,7 @@ struct EEPROMHeader {
     time32_t lastWriteUTC;  // Timestamp of last EEPROM update
     uint8_t reserved[8];    // Padding/future use
 };
+static_assert(sizeof(EEPROMHeader) == 16, "EEPROMHeader must be 16 bytes");
 
 // --- ConfigData ---
 struct ConfigData {
@@ -43,39 +51,75 @@ struct ConfigData {
     bool DST;            // doDST (boolean)             // JSON: DST
     char MOD[3];         // modelType (2-letter String) // JSON: MOD
     bool CRS;            // currentStudy (boolean)      // JSON: CRS
-    uint8_t reserved[20];// Padding to make 64 bytes
+    uint32_t status_period_sec;         // normal status cadence (default 21600)
+    uint16_t force_report_min_gap_sec;  // minimum gap between forced reports (default 60)
+    uint8_t reserved[2];               // Padding to make 64 bytes
 };
+static_assert(sizeof(ConfigData) == 64, "ConfigData must be 64 bytes");
 
 // --- StatusData ---
+#define STATUSDATA_SIZE 64
 struct StatusData {
     FlagStation OSTA;      // orderedStation (enum)           // JSON: OSTA
     FlagStation NF01;           // null field 01 (was ASTA)        // JSON: n/a
     char AEID[12];         // activeEventID                   // JSON: AEID
     uint32_t NEXT;         // nextActionTime (epoch)          // JSON: NEXT
-    bool EVLD;             // eventValid                      // JSON: EVLD
+    uint8_t EVLD;          // eventValid                      // JSON: EVLD
     char NF02[5];               // null field 02 (was MVST)        // JSON: n/a
     float NF03;                 // null field 03 (was VLTS)        // JSON: n/a
     float NF04;                 // null field 04 (was AMPS)        // JSON: n/a
     uint32_t TIME;         // timestamp last written          // JSON: TIME
-    bool NF05;                  // null field 05 (was LID)         // JSON: n/a
-    FlagStation NSTA;      // nextStation (enum)              // JSON: NSTA
-    uint8_t reserved[21];  // Padding to make 64 bytes
+    uint8_t NF05;       // null field 05 (was LID)         // JSON: n/a 
+    FlagStation NSTA;        // nextStation (enum)              // JSON: NSTA
+    uint32_t reboot_count;   // count of boots (persisted)       // JSON: RBT (later)
+    uint8_t reserved[15];    // Padding/future use
 };
+static_assert(sizeof(StatusData) == 64, "StatusData must be 64 bytes");
 
 // --- Events ---
 struct EventHeader {
     uint8_t eventCount;
     uint8_t reserved[7];
 };
+static_assert(sizeof(EventHeader) == 8, "EventHeader must be 8 bytes");
 
 struct FlagEvent {
     char idv[12];       // Event IDV
     char flg[3];        // Flag abbreviation
     char bmk[20];       // Begin mark
     char emk[20];       // End mark
-    bool deleted;       // DEL flag
-    uint8_t reserved[9];
+    uint8_t deleted;    // DEL flag
+    uint8_t reserved[8];
 };
+static_assert(sizeof(FlagEvent) == 64, "FlagEvent must be 64 bytes");
+
+// --- ConfigExt (CFGX) ---
+struct ConfigExt {
+    uint16_t magic;            // CFGX_MAGIC
+    uint8_t  version;          // CFGX_VERSION
+    uint8_t  flags;            // future use
+
+    uint16_t stall_limit_ma;   // current-based stall threshold (mA). default 1800
+    uint16_t move_timeout_sec; // timeout-based stall threshold (sec). default 120
+
+    uint8_t reserved[56];      // pad to 64 bytes
+};
+static_assert(sizeof(ConfigExt) == 64, "ConfigExt must be 64 bytes");
+
+// ====================
+// Compile-time EEPROM layout checks
+
+static_assert(EEPROM_ADDR_HEADER + sizeof(EEPROMHeader) <= EEPROM_ADDR_CONFIG,
+              "EEPROM overlap: HEADER spills into CONFIG");
+
+static_assert(EEPROM_ADDR_CONFIG + sizeof(ConfigData) <= EEPROM_ADDR_STATUS,
+              "EEPROM overlap: CONFIG spills into STATUS");
+
+static_assert(EEPROM_ADDR_STATUS + sizeof(StatusData) <= EEPROM_ADDR_EVENT_HDR,
+              "EEPROM overlap: STATUS spills into EVENT_HDR");
+
+static_assert(EEPROM_ADDR_EVENT_HDR + sizeof(EventHeader) <= EEPROM_ADDR_EVENT_LIST,
+              "EEPROM overlap: EVENT_HDR spills into EVENT_LIST");
 
 // ====================
 // Core Functions
@@ -83,7 +127,11 @@ struct FlagEvent {
 bool validateOrMigrateEEPROM();
 void initEEPROM();
 bool migrateEEPROM(uint8_t oldVersion);
-
+void bumpRebootCount();
+void initConfigExt();
+bool validateOrInitConfigExt();
+void readConfigExt(ConfigExt &x);
+void writeConfigExt(const ConfigExt &x);
 // ====================
 // Wrapper Functions
 // ====================

@@ -72,6 +72,10 @@ class HalyardManager {
   uint8_t _targetSpeed = 255;  // Target speed for the motor
   uint8_t _currentSpeed = 0;  // Current speed during ramping
   bool _rampActive = false;  // Whether ramping is active
+  
+  // Stall and timeout configuration (remotely settable)
+  float    _stallLimitAmps = 1.8f;     // default
+  uint16_t _moveTimeoutSec = 120;      // default
 
   // Station tracking
   FlagStation _ordered = FLAG_FULL;
@@ -107,6 +111,14 @@ public:
     _actual = FLAG_UNKNOWN;
     Serial.println("Flag position invalidated.");
   }
+  
+  // Configuration setters/getters
+  void applyConfigExtToRuntime();
+  void setStallLimitMa(uint16_t ma) { _stallLimitAmps = ((float)ma) / 1000.0f; }
+  void setMoveTimeoutSec(uint16_t sec) { _moveTimeoutSec = sec; }
+
+  float getStallLimitAmps() const { return _stallLimitAmps; }
+  uint16_t getMoveTimeoutSec() const { return _moveTimeoutSec; }
 
 
   void begin();
@@ -123,5 +135,4 @@ public:
   void clearStall() { _stall = false; };
   bool lowering() const { return _lastDirection == CW; };
 };
-
 #endif
