@@ -1,4 +1,3 @@
-
 // Include necessary libraries
 // #include "JsonParserGeneratorRK.h"
 // using namespace JsonWriterGeneratorRK;  
@@ -14,7 +13,7 @@
 /**************/
 // Define product ID and version for Particle Cloud
 // PRODUCT_ID(38638) // Unique product ID for SmartFlag-Gen3 (discontinued after 4.0.0)
-PRODUCT_VERSION(5) // Incremented for version 5 (status report cadence changes)
+PRODUCT_VERSION(6) // Incremented for version 6 (status reporting refactor)
 
 // // Thermistor coefs                                 These values may need to be tuned
 // #define NTC_NOMINAL_RESISTANCE                      10000
@@ -102,7 +101,7 @@ void setup() {
     readStatus(status);
     halMgr1.setOrderedStation(status.OSTA);  // Set ordered station from EEPROM without saving again
 
-    // Debugging functions
+    // Particle functions
     // Particle.function("RunMotor", handleRunMotor);
     Particle.function("TempHALF", setHALF);
     Particle.function("TempFULL", setFULL);
@@ -112,11 +111,10 @@ void setup() {
     Particle.function("clearFault", remoteClearFault);
     Particle.function("dbg", dbgToggle);
 
-    Particle.variable("Config", configToJSON );
-    // Particle.variable("Status", statusVar ); // Use lambda to capture current status
-    Particle.variable("Status", []() -> String { return getStatus ( "QRY" ) ; } );
+    Particle.variable("Config", configToJSON);
+    Particle.variable("Status", []() -> String { return getStatus("QRY"); });
 
-    setupFSM (fsm);
+    setupFSM(fsm);
     fsm.begin(STATE_STARTUP); // Start with the startup state
 }
 
@@ -124,93 +122,64 @@ void loop() {
 
     buzzer.update();
     
-    if ( !lidSensor.isPresent() && fsm.currentState() != STATE_LID_OPEN ) { // If the lid just opened
+    if (!lidSensor.isPresent() && fsm.currentState() != STATE_LID_OPEN) {
         fsm.enqueueEvent(EVENT_LID_OPEN);
     }
     
     halMgr1.update();       // Update the halyard manager state
     fsm.update();           // Update the FSM state machine
-    checkAndReportStatus( false , "RPT");   // Periodic status report
+    checkAndReportStatus(false, "RPT");   // Periodic status report
     serviceRemoteRequests();
 }
 
 int setHALF(String duration) {
-    halMgr1.setForcedStation(FLAG_HALF, validateDuration(duration)); // Set forced station with provided duration
-    return 0; // Success
+    halMgr1.setForcedStation(FLAG_HALF, validateDuration(duration));
+    return 0;
 }
 
 int setFULL(String duration) {
-    halMgr1.setForcedStation(FLAG_FULL, validateDuration(duration)); // Set forced station with provided duration
-    return 0; // Success
+    halMgr1.setForcedStation(FLAG_FULL, validateDuration(duration));
+    return 0;
 }
 
 int remoteClearFault(String arg) {
-  // Accept simple args:
-  // "" or "ALL"  -> clear all
-  // "STALL"      -> clear just that (optional)
-  // "TIMEOUT"    -> clear just that (optional)
-
-  g_clearFaultArg = arg;
-  g_clearFaultRequested = true;
-
-  return 1; // accepted
+    g_clearFaultArg = arg;
+    g_clearFaultRequested = true;
+    return 1;
 }
 
 static bool isSafeToClearFault() {
-  // Replace these with your real checks.
-  // Aim: DO NOT clear if the halyard is moving or lid is open.
-
-  bool lidClosed = true;
-  bool motorInactive = true;
-  bool fsmIdle = true;
-
-  // Examples (adjust to your APIs):
-  lidClosed = lidSensor.isPresent();
-  motorInactive = !halMgr1.isRunning();
-//   fsmIdle = fsm.isInIdleState();
-
-  return lidClosed && motorInactive && fsmIdle;
+    bool lidClosed    = lidSensor.isPresent();
+    bool motorInactive = !halMgr1.isRunning();
+    bool fsmIdle      = true;
+    // fsmIdle = fsm.isInIdleState(); // placeholder
+    return lidClosed && motorInactive && fsmIdle;
 }
 
 void serviceRemoteRequests() {
-  if (!g_clearFaultRequested) return;
+    if (!g_clearFaultRequested) return;
 
-  if (!isSafeToClearFault()) {
-    // Decide whether to keep the request latched (try again later)
-    // or reject it outright. I recommend rejecting to avoid surprise behavior.
-    Particle.publish("ClearFault", "Rejected:not-safe", PRIVATE);
+    if (!isSafeToClearFault()) {
+        Particle.publish("ClearFault", "Rejected:not-safe", PRIVATE);
+        g_clearFaultRequested = false;
+        g_clearFaultArg = "";
+        return;
+    }
+
+    fsm.enqueueEvent(EVENT_CLEAR_FAULT);
     g_clearFaultRequested = false;
     g_clearFaultArg = "";
-    return;
-  }
-
-  fsm.enqueueEvent(EVENT_CLEAR_FAULT);
-
-  g_clearFaultRequested = false;
-  g_clearFaultArg = "";
 }
 
 unsigned long validateDuration(const String& duration) {
+    if (duration.length() == 0)          return 3 * 60 * 1000;
+    if (duration.equalsIgnoreCase("X"))  return 0;
 
-    if ( duration.length() == 0) return 3 * 60 * 1000;      // Handle null or blank input → default to 3 minutes
-
-    if (duration.equalsIgnoreCase("X")) return 0;   // Return 0 if input is "X" (case-insensitive)
-
-    // Try to convert to integer
     char* endPtr;
     long minutes = strtol(duration.c_str(), &endPtr, 10);
-
-    // Check for conversion failure or extra characters
-    if (endPtr == duration.c_str() || *endPtr != '\0') {
-        return -1;  // Invalid input
-    }
-
-    // Return 0 if negative
-    if (minutes < 0) {
-        return 0;
-    }
-
-    return minutes * 60 * 1000;  // Convert to milliseconds
+    if (endPtr == duration.c_str() || *endPtr != '\0') return -1;
+    if (minutes < 0) return 0;
+    return minutes * 60 * 1000;
 }
 
 int setStation(String station) {
@@ -220,15 +189,14 @@ int setStation(String station) {
         halMgr1.setOrderedStation(FLAG_FULL);
     } else if (String(station.toUpperCase().charAt(0)) == "S") {
         halMgr1.setOrderedStation(FLAG_STOP);
-        halMgr1.setActualStation(FLAG_STOP); // Immediate effect
+        halMgr1.setActualStation(FLAG_STOP);
     } else {
-        return -1; // Invalid station value
+        return -1;
     }
-    return 0; // Success
+    return 0;
 }
 
-int playIDTones( String dummyArg ) {
-    buzzer.playEvent(BUZZ_ID_TONES); // Play identifier sound
-    return 0; // Success
+int playIDTones(String dummyArg) {
+    buzzer.playEvent(BUZZ_ID_TONES);
+    return 0;
 }
-
