@@ -1,6 +1,6 @@
 #include "HalyardManager.h"
 #include "BuzzerManager.h"
-#include "sensors/Sensor.h"
+#include "Sensor.h"
 #include "EEPROMManager.h"
 #include "FlagUtils.h"
 

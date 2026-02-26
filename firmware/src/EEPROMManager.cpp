@@ -3,8 +3,8 @@
 #include "EEPROMManager.h"
 #include "HalyardManager.h"
 #include "FlagUtils.h"
-#include "fsm/SmartFlagFSM.h"
-#include "sensors/Sensor.h"
+#include "SmartFlagFSM.h"
+#include "Sensor.h"
 #include <time.h>
 
 // These must be defined in main firmware

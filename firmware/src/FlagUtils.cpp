@@ -1,7 +1,8 @@
 #include "FlagUtils.h"
 #include "HalyardManager.h"
-#include "fsm/SmartFlagFSM.h"
+#include "SmartFlagFSM.h"
 #include "EEPROMManager.h"
+#include "EventManager.h"
 
 extern HalyardManager halMgr1;
 extern FSMController fsm;
@@ -18,6 +19,9 @@ static FlagStation    s_moveFromStation = FLAG_UNKNOWN;
 static FlagStation    s_moveToStation   = FLAG_UNKNOWN;
 static FlagMoveStatus s_lastMoveResult  = FLAG_MOVE_NONE;
 static bool           s_moveInProgress  = false;
+static const char*    s_faultType       = nullptr;  // "STL", "TMO", or nullptr
+static uint8_t        s_faultAttempts   = 0;        // consecutive failed moves; resets only on FLAG_ON_STATION
+static time_t         s_faultDetectedTime = 0;      // UTC time of first fault in current cycle; 0 = no active fault
 
 // Move current stats — updated while motor is running via updateMoveCurrentStats()
 static float s_movePeakAmps = 0.0f;
@@ -127,6 +131,7 @@ void reportMoveStart(FlagStation fromStation, FlagStation toStation) {
     s_moveFromStation = fromStation;
     s_moveToStation   = toStation;
     s_moveInProgress  = true;
+    s_faultType       = nullptr;         // clear any prior fault on new move
     resetMoveCurrentStats();
     checkAndReportStatus(true, "MVS");   // Move Start
 }
@@ -134,6 +139,12 @@ void reportMoveStart(FlagStation fromStation, FlagStation toStation) {
 void reportMoveEnd(FlagMoveStatus moveResult, FlagStation actualStation) {
     s_lastMoveResult = moveResult;
     s_moveInProgress = false;
+    if      (moveResult == FLAG_MOVE_STALL)   { s_faultType = "STL"; if (s_faultAttempts == 0) s_faultDetectedTime = Time.isValid() ? Time.now() : 0; s_faultAttempts++; }
+    else if (moveResult == FLAG_MOVE_TIMEOUT) { s_faultType = "TMO"; if (s_faultAttempts == 0) s_faultDetectedTime = Time.isValid() ? Time.now() : 0; s_faultAttempts++; }
+    else {
+        s_faultType = nullptr;
+        if (moveResult == FLAG_ON_STATION) { s_faultAttempts = 0; s_faultDetectedTime = 0; }  // true success clears the cycle
+    }
     checkAndReportStatus(true, "MVE");   // Move End
 }
 
@@ -213,6 +224,12 @@ String getStatus(String reason) {
     writer.name("OSTA").value(flagStationToString(halMgr1.getOrderedStation()));    // Ordered station
     writer.name("ASTA").value(flagStationToString(halMgr1.getActualStation()));     // Actual station
     writer.name("FSM").value(stateToString(curState));                              // FSM state
+    if (s_faultType) {
+        writer.name("ERR").value(s_faultType);                                      // Fault type (STL/TMO) — present when fault active
+        if (s_faultDetectedTime > 0) writer.name("FDT").value(Time.format(s_faultDetectedTime, TIME_FORMAT_ISO8601_FULL));
+        else                         writer.name("FDT").nullValue();                // null if clock wasn't synced at fault detection
+    }
+    writer.name("FATM").value((int)s_faultAttempts);                               // Fault attempt count (0 = clear/healthy)
     writer.name("FSD").value(stateDurSec);                                          // FSM state duration (sec)
     writer.name("MTR").value(halMgr1.isRunning() ? "RUN" : "STP");                 // Motor running?
     writer.name("LMR").value(moveResultToString(s_lastMoveResult));                 // Last move result
@@ -224,7 +241,10 @@ String getStatus(String reason) {
     writer.name("RBT").value(rebootCount);                                          // Reboot count
     writer.name("RSS").value(s_cachedRSSI, 1);                                      // Cellular signal strength
     writer.name("QUL").value(s_cachedQual, 1);                                      // Cellular signal quality
-    // NSTA and NXT intentionally omitted until event-handling port is complete
+    writer.name("NSTA").value(flagStationToString(evMgr.nextFlagStation()));        // Next scheduled station
+    { time_t nxt = evMgr.nextFlagChange();                                          // Next change time (GMT)
+      if (nxt > 0) writer.name("NXT").value(Time.format(nxt, TIME_FORMAT_ISO8601_FULL));
+      else         writer.name("NXT").nullValue(); }
     writer.endObject();
 
     size_t n = writer.bufferSize();

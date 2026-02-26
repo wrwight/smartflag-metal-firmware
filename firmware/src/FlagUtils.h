@@ -2,7 +2,7 @@
 
 #include "Particle.h"
 #include "HalyardManager.h"
-#include "fsm/SmartFlagFSM.h"
+#include "SmartFlagFSM.h"
 #include "Dbg.h"
 
 String flagStationToString(FlagStation station);

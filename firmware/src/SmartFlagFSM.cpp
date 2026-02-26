@@ -1,6 +1,6 @@
 #include "SmartFlagFSM.h"
 #include "FaultManager.h"
-#include "sensors/Sensor.h"
+#include "Sensor.h"
 #include "FlagUtils.h"
 
 extern HalyardManager halMgr1;
@@ -164,7 +164,7 @@ void defineLidOpenState(FSMController& fsm) {
         halMgr1.invalidateStation();
         buzzer.playEvent(BUZZ_STOP);
         // stopMotor() above fires reportMoveEnd() if a move was in progress.
-        // No additional publish needed here.
+        checkAndReportStatus(true, "LID");   // announce lid-open state to dashboard
     };
 
     state.onUpdate = []() {
@@ -192,7 +192,7 @@ void defineLidOpenState(FSMController& fsm) {
         }
     };
 
-    state.onExit        = []() {};
+    state.onExit        = []() { checkAndReportStatus(true, "LCL"); };   // lid closed / LID state cleared
     state.shouldAdvance = []() -> FSMStateID { return fsmNextState; };
     fsm.addState(STATE_LID_OPEN, state);
 }
