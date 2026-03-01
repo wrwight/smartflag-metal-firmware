@@ -9,11 +9,11 @@
 // Constants
 // ====================
 #define EEPROM_MAGIC    0x4733  // 'G3'
-#define EEPROM_VERSION  2
+#define EEPROM_VERSION  3
 #define EEPROM_TOTAL_BYTES 2047
 
 #define CFGX_MAGIC   0xC0DE
-#define CFGX_VERSION 1
+#define CFGX_VERSION 2
 #define EEPROM_ADDR_CFGX (EEPROM_TOTAL_BYTES - 64)   // 1983
 
 // EEPROM layout offsets
@@ -84,14 +84,17 @@ struct EventHeader {
 static_assert(sizeof(EventHeader) == 8, "EventHeader must be 8 bytes");
 
 struct FlagEvent {
-    char idv[12];       // Event IDV
-    char flg[3];        // Flag abbreviation
-    char bmk[20];       // Begin mark
-    char emk[20];       // End mark
-    uint8_t deleted;    // DEL flag
-    uint8_t reserved[8];
+    char     idv[12];        // Event IDV
+    char     flg[3];         // Flag abbreviation
+    char     bmk[20];        // Begin mark
+    char     emk[20];        // End mark
+    uint8_t  deleted;        // DEL flag
+    char     jur[8];         // Jurisdiction string (e.g. "FE-US")
+    uint8_t  sjrCount;       // Number of valid sjrList entries (0..7)
+    uint8_t  reserved2;      // alignment pad
+    uint16_t sjrList[7];     // Sub-jurisdiction IDs (uint16_t; max 7 entries)
 };
-static_assert(sizeof(FlagEvent) == 64, "FlagEvent must be 64 bytes");
+static_assert(sizeof(FlagEvent) == 80, "FlagEvent must be 80 bytes");
 
 // --- ConfigExt (CFGX) ---
 struct ConfigExt {
@@ -102,7 +105,11 @@ struct ConfigExt {
     uint16_t stall_limit_ma;   // current-based stall threshold (mA). default 1800
     uint16_t move_timeout_sec; // timeout-based stall threshold (sec). default 120
 
-    uint8_t reserved[56];      // pad to 64 bytes
+    uint8_t  sjrCount;         // number of valid unit SJR entries (0..5)
+    uint8_t  sjrPad;           // alignment padding
+    uint16_t sjrList[5];       // unit's configured sub-jurisdiction IDs (up to 5)
+
+    uint8_t reserved[44];      // pad to 64 bytes
 };
 static_assert(sizeof(ConfigExt) == 64, "ConfigExt must be 64 bytes");
 

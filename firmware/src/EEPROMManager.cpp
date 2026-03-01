@@ -136,6 +136,26 @@ bool migrateEEPROM(uint8_t oldVersion) {
         return true;
     }
 
+    if (oldVersion == 2 && EEPROM_VERSION == 3) {
+        // FlagEvent struct grew from 64 to 80 bytes — old event data at old offsets
+        // is layout-incompatible with the new struct.  Preserve config and status;
+        // clear the event list.  Events will re-arrive via cloud subscription.
+
+        ConfigData cfg_v2;
+        EEPROM.get(EEPROM_ADDR_CONFIG, cfg_v2);
+
+        StatusData st_v2;
+        EEPROM.get(EEPROM_ADDR_STATUS, st_v2);
+
+        initEEPROM();   // writes new header (version 3) and zeroes event list
+
+        EEPROM.put(EEPROM_ADDR_CONFIG, cfg_v2);
+        EEPROM.put(EEPROM_ADDR_STATUS, st_v2);
+
+        SFDBG::pub("EEP", "Migrated v2->v3: cfg/status kept, events cleared (struct resize)", true);
+        return true;
+    }
+
     // Unknown migration path
     SFDBG::pub("EEP", String::format("No migration path from v%u to v%u", oldVersion, EEPROM_VERSION), true);
     return false;

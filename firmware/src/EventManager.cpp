@@ -68,8 +68,9 @@ EventManager::EventManager()
     : _upperFlag(""), _upperFlagPrio(0),
       _lat(0.0), _lng(0.0),
       _jurFederal(""), _jurState(""), _postalCode(""),
-      _tzOffset(0.0f), _doDST(false), _sjrID(0)
+      _tzOffset(0.0f), _doDST(false), _sjrCount(0)
 {
+    memset( _sjrList, 0, sizeof(_sjrList) );
 }
 
 EventManager::~EventManager() {
@@ -225,7 +226,21 @@ int EventManager::configScheduler( String JSONconfig ) {
         else if ( field == "STA" ) { _jurState         = String(iter.value().toString());      }
         else if ( field == "FPR" ) { _upperFlagPrio    = iter.value().toInt();                 }
         else if ( field == "FLG" ) { _upperFlag        = String(iter.value().toString());      }
-        else if ( field == "SJR" ) { _sjrID            = iter.value().toInt();                 }
+        else if ( field == "SJR" ) {
+            // Accept array form "SJR":[12,34] or scalar form "SJR":12
+            _sjrCount = 0;
+            memset( _sjrList, 0, sizeof(_sjrList) );
+            JSONValue sjrVal = iter.value();
+            if ( sjrVal.isArray() ) {
+                JSONArrayIterator aIter( sjrVal );
+                while ( aIter.next() && _sjrCount < 5 ) {
+                    _sjrList[ _sjrCount++ ] = (uint16_t)aIter.value().toInt();
+                }
+            } else {
+                int v = sjrVal.toInt();
+                if ( v != 0 ) { _sjrList[0] = (uint16_t)v; _sjrCount = 1; }
+            }
+        }
         // All other recognised config fields (MOD, CRS, etc.) live in ConfigData
         // and are handled by EEPROMManager directly – not duplicated here.
     }
@@ -252,6 +267,20 @@ int EventManager::configScheduler( String JSONconfig ) {
         cfg.STD = _tzOffset;
         cfg.DST = _doDST;
         writeConfig( cfg );
+    }
+
+    // Persist SJR list to ConfigExt (read-modify-write)
+    {
+        ConfigExt x;
+        readConfigExt( x );
+        if ( x.magic != CFGX_MAGIC || x.version != CFGX_VERSION ) {
+            initConfigExt();
+            readConfigExt( x );
+        }
+        x.sjrCount = (uint8_t)_sjrCount;
+        for ( int i = 0; i < 5; i++ )
+            x.sjrList[i] = ( i < _sjrCount ) ? _sjrList[i] : 0;
+        writeConfigExt( x );
     }
 
     reprocessEvents();
@@ -333,14 +362,18 @@ bool EventManager::eventApplies( const FlagEventEx &ev ) {
 
     // ── 3) Sub-jurisdiction filtering (NEW – Gen3) ────────────────────────────
     //    If the event carries NO SJR list, it applies statewide – pass.
-    //    If it carries a SJR list, this unit must appear in that list.
-    if ( ev.sjrCount > 0 && _sjrID != 0 ) {
+    //    If it carries a SJR list, the unit MUST have at least one configured SJR
+    //    that matches one of the event's SJRs.  Units with no configured SJRs
+    //    do NOT receive SJR-targeted events.
+    if ( ev.sjrCount > 0 ) {
         bool sjrOK = false;
-        for ( int i = 0; i < ev.sjrCount; i++ ) {
-            if ( ev.sjrList[i] == _sjrID ) { sjrOK = true; break; }
+        for ( int i = 0; i < _sjrCount && !sjrOK; i++ ) {
+            for ( int j = 0; j < ev.sjrCount && !sjrOK; j++ ) {
+                if ( _sjrList[i] == (uint16_t)ev.sjrList[j] ) sjrOK = true;
+            }
         }
         if ( !sjrOK ) {
-            SFDBG::pub("EM", "EVT " + String(ev.eventID) + " sjr-fail: id=" + String(_sjrID), true);
+            SFDBG::pub("EM", "EVT " + String(ev.eventID) + " sjr-fail: unitSJR=" + String(_sjrCount), true);
             return false;
         }
     }
@@ -513,12 +546,16 @@ FlagEventEx EventManager::parseEvent( const String &json ) {
         } else if ( field == "BMK" ) {
             tEVL.BMK = String( iter.value().toString() );
             if ( parseTimeMark( tEVL.GMTbegin, tEVL.BMK, "H" ) != 0 ) {
+                SFDBG::pub("EM", "EVT " + String(tEVL.eventID)
+                                + " tmk-fail BMK=" + tEVL.BMK, true);
                 tEVL.valid = false; break;
             }
 
         } else if ( field == "EMK" ) {
             tEVL.EMK = String( iter.value().toString() );
             if ( parseTimeMark( tEVL.GMTend, tEVL.EMK, "F" ) != 0 ) {
+                SFDBG::pub("EM", "EVT " + String(tEVL.eventID)
+                                + " tmk-fail EMK=" + tEVL.EMK, true);
                 tEVL.valid = false; break;
             }
 
@@ -687,7 +724,9 @@ String EventManager::showConfig() {
         writer.name("STA").value( _jurState    );
         writer.name("FPR").value( _upperFlagPrio );
         writer.name("FLG").value( _upperFlag   );
-        writer.name("SJR").value( _sjrID       );
+        writer.name("SJR").beginArray();
+        for ( int i = 0; i < _sjrCount; i++ ) writer.value( (int)_sjrList[i] );
+        writer.endArray();
     writer.endObject();
 
     return String(buf);
@@ -754,7 +793,23 @@ int EventManager::setShowIdx( int idx ) {
 }
 
 String EventManager::showEventAtCursor() {
-    return showEvent( _EVL[_showIdx] );
+    String result = showEvent( _EVL[_showIdx] );
+
+    // Advance to the next valid event slot in ring fashion.
+    // "Valid" means eventID > 0 and valid flag set.
+    // Start search one past current; wrap all the way around.
+    int next = -1;
+    for ( int i = 1; i <= N_EVENTS; i++ ) {
+        int candidate = (_showIdx + i) % N_EVENTS;
+        if ( _EVL[candidate].valid && _EVL[candidate].eventID > 0 ) {
+            next = candidate;
+            break;
+        }
+    }
+
+    _showIdx = (next >= 0) ? next : 0;   // no valid events → reset to slot 0
+
+    return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -799,15 +854,23 @@ void EventManager::loadConfig() {
     _postalCode    = String( cfg.ZIP );
     _tzOffset      = cfg.STD;
     _doDST         = cfg.DST;
-    _sjrID         = 0;   // sjrID not yet in ConfigExt; set via configScheduler() only
+
+    // Load unit SJR list from ConfigExt
+    ConfigExt x;
+    readConfigExt( x );
+    _sjrCount = 0;
+    memset( _sjrList, 0, sizeof(_sjrList) );
+    if ( x.magic == CFGX_MAGIC && x.version == CFGX_VERSION ) {
+        int n = min( (int)x.sjrCount, 5 );
+        for ( int i = 0; i < n; i++ ) _sjrList[i] = x.sjrList[i];
+        _sjrCount = n;
+    }
 }
 
 //  loadFromEEPROM()  –  restore saved event list
 //
-//  Note: FlagEvent EEPROM schema stores only idv, flg, bmk, emk.
-//  eventJur and sjrList are NOT persisted; after reboot those fields
-//  will be empty and eventApplies() will fail the jurisdiction check
-//  until events are re-published via cloud subscription.
+//  FlagEvent persists: idv, flg, bmk, emk, jur, sjrCount, sjrList[].
+//  All fields required by eventApplies() survive reboots intact.
 int EventManager::loadFromEEPROM() {
     EventHeader hdr;
     readEventHeader( hdr );
@@ -834,6 +897,14 @@ int EventManager::loadFromEEPROM() {
         _EVL[i].eventFlag  = String( stored.flg );
         _EVL[i].BMK        = String( stored.bmk );
         _EVL[i].EMK        = String( stored.emk );
+        _EVL[i].eventJur   = String( stored.jur );
+
+        // Restore sub-jurisdiction list
+        int nSjr = min( (int)stored.sjrCount, FlagEventEx::MAX_SJR );
+        _EVL[i].sjrCount = nSjr;
+        for ( int j = 0; j < nSjr; j++ ) {
+            _EVL[i].sjrList[j] = (int)stored.sjrList[j];
+        }
     }
 
     return 0;
@@ -841,9 +912,9 @@ int EventManager::loadFromEEPROM() {
 
 //  saveToEEPROM()  –  persist current event list
 //
-//  Stores only the fields present in FlagEvent: idv (encodes eventID.eventVer),
-//  flg, bmk, emk.  eventJur and sjrList are RAM-only and must re-arrive via
-//  cloud subscription after a reboot.
+//  Stores all FlagEvent fields: idv, flg, bmk, emk, jur, sjrCount, sjrList[].
+//  Up to 7 SJR entries are stored (uint16_t each); entries beyond 7 are dropped
+//  (no real-world event is expected to carry more than 7 sub-jurisdictions).
 int EventManager::saveToEEPROM() {
     int count = 0;
 
@@ -857,6 +928,15 @@ int EventManager::saveToEEPROM() {
             strncpy( stored.flg, _EVL[i].eventFlag.c_str(), sizeof(stored.flg) - 1 );
             strncpy( stored.bmk, _EVL[i].BMK.c_str(),       sizeof(stored.bmk) - 1 );
             strncpy( stored.emk, _EVL[i].EMK.c_str(),       sizeof(stored.emk) - 1 );
+            strncpy( stored.jur, _EVL[i].eventJur.c_str(),  sizeof(stored.jur) - 1 );
+
+            // Persist sub-jurisdiction list (clamped to 7 entries)
+            int nSjr = min( _EVL[i].sjrCount, 7 );
+            stored.sjrCount = (uint8_t)nSjr;
+            for ( int j = 0; j < nSjr; j++ ) {
+                stored.sjrList[j] = (uint16_t)_EVL[i].sjrList[j];
+            }
+
             stored.deleted = 0;
             count++;
         }

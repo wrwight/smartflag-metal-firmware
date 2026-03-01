@@ -1,5 +1,11 @@
-// main.ino  –  SmartFlag Gen3  PRODUCT_VERSION(6)
-// ─────────────────────────────────────────────────────────────────────────────
+// main.ino  –  SmartFlag Gen3  PRODUCT_VERSION(7)
+/* ────────────────────────────────────────────────────────────────────────────────
+ * 2024-06-17  Marked as Gen3.0, v7.  
+    Implemented status reporting changes to support new cloud dashboard.  
+    Added event registration and processing for new SJR (sub-jurisdiction) field, 
+        which is a Gen3-only addition to the event JSON schema.  
+    No changes to core halyard control logic or safety features in this update.
+──────────────────────────────────────────────────────────────────────────────── */
 
 #include "Particle.h"
 #include "HalyardManager.h"
@@ -11,7 +17,7 @@
 #include "FlagUtils.h"
 #include "EventManager.h"
 
-PRODUCT_VERSION(6)
+PRODUCT_VERSION(7)          // firmware version, for OTA update tracking
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Pin assignments
@@ -103,6 +109,9 @@ void setup() {
     Particle.function("dbg",        dbgToggle);
     Particle.function("s_Config",   static_cast<int(*)(String)>([](String s) -> int {
         return evMgr.configScheduler(s);    // event scheduler configuration
+    }));
+    Particle.function("s_InjectEv", static_cast<int(*)(String)>([](String s) -> int {
+        return evMgr.receiveEvent(s);       // direct event injection (catch-up for offline units)
     }));
 
     // ── Cloud variables ───────────────────────────────────────────────────────

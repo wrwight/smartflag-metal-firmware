@@ -215,8 +215,9 @@ private:
     String  _postalCode;       // ZIP  – postal code
     float   _tzOffset;         // STD  – hours offset from UTC (standard time)
     bool    _doDST;            // DST  – observe DST (North American rules)
-    int     _sjrID;            // SJR  – this unit's sub-jurisdiction ID (0 = unassigned)
-                               //        stored in ConfigExt._sjrID
+    uint16_t _sjrList[5];      // SJR  – this unit's configured sub-jurisdiction IDs
+    int      _sjrCount;        //        number of valid entries in _sjrList (0 = unassigned)
+                               //        stored in ConfigExt.sjrCount / sjrList
 
     // ── State ─────────────────────────────────────────────────────────────────
     bool        _configured  = false;
